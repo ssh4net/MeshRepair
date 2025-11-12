@@ -13,7 +13,7 @@ namespace MeshRepair {
  */
 struct FillingOptions {
     // Fairing parameters (Laplacian smoothing)
-    unsigned int fairing_continuity = Config::DEFAULT_FAIRING_CONTINUITY;  // 0=C⁰, 1=C¹, 2=C²
+    unsigned int fairing_continuity = Config::DEFAULT_FAIRING_CONTINUITY;  // 0=C0, 1=C1, 2=C2
 
     // Size limits to prevent processing excessively large holes
     size_t max_hole_boundary_vertices = Config::DEFAULT_MAX_HOLE_BOUNDARY;

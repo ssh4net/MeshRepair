@@ -3,6 +3,7 @@
 #include "hole_filler.h"
 #include "mesh_validator.h"
 #include "progress_reporter.h"
+#include "mesh_preprocessor.h"
 #include "config.h"
 
 #include <iostream>
@@ -21,7 +22,7 @@ void print_usage(const char* program_name) {
               << "  output                 Output mesh file (.obj, .ply, .off)\n\n"
               << "Options:\n"
               << "  --continuity <0|1|2>   Fairing continuity (default: 1)\n"
-              << "                         0 = C⁰, 1 = C¹, 2 = C²\n"
+              << "                         0 = C0, 1 = C1, 2 = C2\n"
               << "  --max-boundary <n>     Max hole boundary vertices (default: 1000)\n"
               << "  --max-diameter <r>     Max hole diameter ratio (default: 0.1)\n"
               << "  --no-2d-cdt            Disable 2D constrained Delaunay\n"
@@ -33,6 +34,15 @@ void print_usage(const char* program_name) {
               << "  --stats                Show detailed statistics\n"
               << "  --validate             Validate mesh before/after\n"
               << "  --ascii-ply            Save PLY in ASCII format (default: binary)\n"
+              << "\n"
+              << "Preprocessing:\n"
+              << "  --preprocess           Enable all preprocessing steps\n"
+              << "  --no-remove-duplicates Disable duplicate vertex removal\n"
+              << "  --no-remove-non-manifold Disable non-manifold vertex removal\n"
+              << "  --no-remove-isolated   Disable isolated vertex removal\n"
+              << "  --non-manifold-passes <n> Number of non-manifold removal passes (default: 2)\n"
+              << "  --debug                Dump intermediate meshes as binary PLY\n"
+              << "\n"
               << "  --help                 Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " input.obj output.obj\n"
@@ -48,6 +58,14 @@ struct CommandLineArgs {
     bool validate = false;
     bool quiet = false;
     bool ascii_ply = false;  // Use ASCII PLY instead of binary
+
+    // Preprocessing options
+    bool enable_preprocessing = false;
+    bool preprocess_remove_duplicates = true;
+    bool preprocess_remove_non_manifold = true;
+    bool preprocess_remove_isolated = true;
+    size_t non_manifold_passes = 2;
+    bool debug = false;
 
     bool parse(int argc, char** argv) {
         if (argc < 3) {
@@ -110,6 +128,28 @@ struct CommandLineArgs {
             else if (arg == "--ascii-ply") {
                 ascii_ply = true;
             }
+            else if (arg == "--preprocess") {
+                enable_preprocessing = true;
+            }
+            else if (arg == "--no-remove-duplicates") {
+                preprocess_remove_duplicates = false;
+            }
+            else if (arg == "--no-remove-non-manifold") {
+                preprocess_remove_non_manifold = false;
+            }
+            else if (arg == "--no-remove-isolated") {
+                preprocess_remove_isolated = false;
+            }
+            else if (arg == "--non-manifold-passes" && i + 1 < argc) {
+                non_manifold_passes = std::stoul(argv[++i]);
+                if (non_manifold_passes == 0) {
+                    std::cerr << "Error: Non-manifold passes must be at least 1\n";
+                    return false;
+                }
+            }
+            else if (arg == "--debug") {
+                debug = true;
+            }
             else {
                 std::cerr << "Unknown option: " << arg << "\n";
                 return false;
@@ -159,6 +199,24 @@ int main(int argc, char** argv) {
         if (!MeshValidator::is_triangle_mesh(mesh)) {
             std::cerr << "Error: Mesh must be a triangle mesh\n";
             return 1;
+        }
+    }
+
+    // Step 1.5: Preprocess mesh if requested
+    if (args.enable_preprocessing) {
+        PreprocessingOptions prep_opts;
+        prep_opts.remove_duplicates = args.preprocess_remove_duplicates;
+        prep_opts.remove_non_manifold = args.preprocess_remove_non_manifold;
+        prep_opts.remove_isolated = args.preprocess_remove_isolated;
+        prep_opts.non_manifold_passes = args.non_manifold_passes;
+        prep_opts.verbose = args.filling_options.verbose;
+        prep_opts.debug = args.debug;
+
+        MeshPreprocessor preprocessor(mesh, prep_opts);
+        auto prep_stats = preprocessor.preprocess();
+
+        if (args.show_stats) {
+            preprocessor.print_report();
         }
     }
 

@@ -36,7 +36,7 @@ std::vector<HoleInfo> HoleDetector::detect_all_holes() {
             const auto& hole = holes[i];
             std::cout << "  Hole " << (i + 1) << ": "
                       << hole.boundary_size << " boundary vertices, "
-                      << "diameter ≈ " << std::fixed << hole.estimated_diameter << "\n";
+                      << "diameter ~ " << std::fixed << hole.estimated_diameter << "\n";
         }
     } else {
         std::cout << "No holes detected. Mesh is closed.\n";

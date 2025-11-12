@@ -12,7 +12,7 @@ namespace Config {
     constexpr const char* APP_NAME = "MeshHoleFiller";
 
     // Default hole filling parameters
-    constexpr unsigned int DEFAULT_FAIRING_CONTINUITY = 1;  // C¹ continuity
+    constexpr unsigned int DEFAULT_FAIRING_CONTINUITY = 1;  // C1 continuity
     constexpr size_t DEFAULT_MAX_HOLE_BOUNDARY = 1000;      // vertices
     constexpr double DEFAULT_MAX_HOLE_DIAMETER_RATIO = 0.1; // 10% of mesh bbox
 
