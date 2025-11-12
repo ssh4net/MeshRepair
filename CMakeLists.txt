@@ -144,6 +144,9 @@ if(ENABLE_OPENMP)
     endif()
 endif()
 
+# Threading support (required for threadpool)
+find_package(Threads REQUIRED)
+
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/meshrepair/include
@@ -158,6 +161,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/mesh_validator.cpp
     meshrepair/progress_reporter.cpp
     meshrepair/mesh_preprocessor.cpp
+    meshrepair/thread_manager.cpp
 )
 
 # Header files
@@ -170,6 +174,8 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/mesh_validator.h
     meshrepair/include/progress_reporter.h
     meshrepair/include/mesh_preprocessor.h
+    meshrepair/include/thread_manager.h
+    meshrepair/include/threadpool.h
 )
 
 # Main executable
@@ -182,6 +188,7 @@ add_executable(mesh_hole_filler
 target_link_libraries(mesh_hole_filler
     CGAL::CGAL
     Eigen3::Eigen
+    Threads::Threads
 )
 
 if(OpenMP_CXX_FOUND)

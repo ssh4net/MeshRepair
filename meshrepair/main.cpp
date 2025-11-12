@@ -44,6 +44,10 @@ void print_usage(const char* program_name) {
               << "  --non-manifold-passes <n> Number of non-manifold removal passes (default: 2)\n"
               << "  --debug                Dump intermediate meshes as binary PLY\n"
               << "\n"
+              << "Threading:\n"
+              << "  --threads <n>          Number of worker threads (default: hw_cores/2, 0 = auto)\n"
+              << "  --queue-size <n>       Pipeline queue size in holes (default: 10)\n"
+              << "\n"
               << "  --help                 Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " input.obj output.obj\n"
@@ -68,6 +72,10 @@ struct CommandLineArgs {
     bool preprocess_keep_largest_component = true;
     size_t non_manifold_passes = 2;
     bool debug = false;
+
+    // Threading options
+    size_t num_threads = 0;      // 0 = auto (hw_cores / 2)
+    size_t queue_size = 10;      // Pipeline queue size
 
     bool parse(int argc, char** argv) {
         if (argc < 3) {
@@ -154,6 +162,16 @@ struct CommandLineArgs {
             }
             else if (arg == "--debug") {
                 debug = true;
+            }
+            else if (arg == "--threads" && i + 1 < argc) {
+                num_threads = std::stoul(argv[++i]);
+            }
+            else if (arg == "--queue-size" && i + 1 < argc) {
+                queue_size = std::stoul(argv[++i]);
+                if (queue_size == 0) {
+                    std::cerr << "Error: Queue size must be at least 1\n";
+                    return false;
+                }
             }
             else {
                 std::cerr << "Unknown option: " << arg << "\n";
