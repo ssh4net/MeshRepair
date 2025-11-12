@@ -6,6 +6,9 @@
 
 namespace MeshRepair {
 
+// Forward declaration
+class ThreadPool;
+
 struct PreprocessingStats {
     size_t duplicates_merged = 0;
     size_t non_manifold_vertices_found = 0;
@@ -53,10 +56,14 @@ public:
     // Print preprocessing report
     void print_report() const;
 
+    // Set thread pool for parallel operations (optional)
+    void set_thread_pool(ThreadPool* pool) { thread_pool_ = pool; }
+
 private:
     Mesh& mesh_;
     PreprocessingOptions options_;
     PreprocessingStats stats_;
+    ThreadPool* thread_pool_ = nullptr;  // Optional thread pool
 };
 
 } // namespace MeshRepair

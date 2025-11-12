@@ -4,6 +4,8 @@
 #include "mesh_validator.h"
 #include "progress_reporter.h"
 #include "mesh_preprocessor.h"
+#include "thread_manager.h"
+#include "pipeline_processor.h"
 #include "config.h"
 
 #include <iostream>
@@ -215,6 +217,14 @@ int main(int argc, char** argv) {
         std::cout << "  Edges: " << mesh.number_of_edges() << "\n\n";
     }
 
+    // Configure threading
+    ThreadingConfig thread_config;
+    thread_config.num_threads = args.num_threads;
+    thread_config.queue_size = args.queue_size;
+    thread_config.verbose = args.filling_options.verbose;
+
+    ThreadManager thread_manager(thread_config);
+
     // Validate input mesh if requested
     if (args.validate) {
         if (!args.quiet) {
@@ -251,15 +261,20 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Step 2: Detect holes
-    if (!args.quiet && args.filling_options.verbose) {
-        std::cout << "Detecting holes...\n";
+    // Step 2 & 3: Detect and fill holes (with threading)
+    PipelineProcessor processor(mesh, thread_manager, args.filling_options);
+
+    MeshStatistics stats;
+    if (thread_manager.get_total_threads() > 1) {
+        // Use pipeline processing for parallel execution
+        stats = processor.process_pipeline(args.filling_options.verbose);
+    } else {
+        // Single-threaded batch processing
+        stats = processor.process_batch(args.filling_options.verbose);
     }
 
-    HoleDetector detector(mesh, args.filling_options.verbose);
-    auto holes = detector.detect_all_holes();
-
-    if (holes.empty()) {
+    // Check if no holes were found
+    if (stats.num_holes_detected == 0) {
         if (!args.quiet) {
             std::cout << "No holes found. Mesh is already closed.\n";
         }
@@ -272,10 +287,6 @@ int main(int argc, char** argv) {
 
         return 0;
     }
-
-    // Step 3: Fill holes
-    HoleFiller filler(mesh, args.filling_options);
-    MeshStatistics stats = filler.fill_all_holes(holes);
 
     // Step 4: Validate output mesh if requested
     if (args.validate) {

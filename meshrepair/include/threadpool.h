@@ -191,8 +191,8 @@ public:
     ThreadPool(size_t threads, size_t maxQueueSize = 1000)
         : stop_(false),
           working_(0),
-          maxQueueSize_(maxQueueSize),
-          tasks_count_(0)
+          tasks_count_(0),
+          maxQueueSize_(maxQueueSize)
     {
         // Create worker threads
         for (size_t i = 0; i < threads; ++i) {

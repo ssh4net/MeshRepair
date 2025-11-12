@@ -162,6 +162,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/progress_reporter.cpp
     meshrepair/mesh_preprocessor.cpp
     meshrepair/thread_manager.cpp
+    meshrepair/pipeline_processor.cpp
 )
 
 # Header files
@@ -176,6 +177,9 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/mesh_preprocessor.h
     meshrepair/include/thread_manager.h
     meshrepair/include/threadpool.h
+    meshrepair/include/pipeline_processor.h
+    meshrepair/include/parallel_utils.h
+    meshrepair/include/parallel_detection.h
 )
 
 # Main executable

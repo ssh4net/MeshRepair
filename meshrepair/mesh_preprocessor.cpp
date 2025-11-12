@@ -1,4 +1,6 @@
 #include "mesh_preprocessor.h"
+#include "parallel_detection.h"
+#include "threadpool.h"
 #include <CGAL/Polygon_mesh_processing/manifoldness.h>
 #include <CGAL/Polygon_mesh_processing/repair.h>
 #include <CGAL/Polygon_mesh_processing/repair_degeneracies.h>
@@ -87,8 +89,11 @@ PreprocessingStats MeshPreprocessor::preprocess() {
         size_t pass = 0;
 
         for (pass = 0; pass < options_.non_manifold_passes; ++pass) {
-            // Detect non-manifold vertices
+            // Detect non-manifold vertices (use parallel if thread pool available)
             std::vector<halfedge_descriptor> nm_halfedges;
+
+            // Note: CGAL's non_manifold_vertices must work on whole mesh (not parallelizable directly)
+            // But we can make the check faster by early exit in future optimization
             PMP::non_manifold_vertices(mesh_, std::back_inserter(nm_halfedges));
 
             if (pass == 0) {
