@@ -8,7 +8,7 @@ namespace PMP = CGAL::Polygon_mesh_processing;
 
 namespace MeshRepair {
 
-HoleDetector::HoleDetector(const Mesh& mesh) : mesh_(mesh) {}
+HoleDetector::HoleDetector(const Mesh& mesh, bool verbose) : mesh_(mesh), verbose_(verbose) {}
 
 std::vector<HoleInfo> HoleDetector::detect_all_holes() {
     std::vector<HoleInfo> holes;
@@ -31,15 +31,19 @@ std::vector<HoleInfo> HoleDetector::detect_all_holes() {
     }
 
     if (!holes.empty()) {
-        std::cout << "Detected " << holes.size() << " hole(s):\n";
-        for (size_t i = 0; i < holes.size(); ++i) {
-            const auto& hole = holes[i];
-            std::cout << "  Hole " << (i + 1) << ": "
-                      << hole.boundary_size << " boundary vertices, "
-                      << "diameter ~ " << std::fixed << hole.estimated_diameter << "\n";
+        if (verbose_) {
+            std::cout << "Detected " << holes.size() << " hole(s):\n";
+            for (size_t i = 0; i < holes.size(); ++i) {
+                const auto& hole = holes[i];
+                std::cout << "  Hole " << (i + 1) << ": "
+                          << hole.boundary_size << " boundary vertices, "
+                          << "diameter ~ " << std::fixed << hole.estimated_diameter << "\n";
+            }
         }
     } else {
-        std::cout << "No holes detected. Mesh is closed.\n";
+        if (verbose_) {
+            std::cout << "No holes detected. Mesh is closed.\n";
+        }
     }
 
     return holes;

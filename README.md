@@ -105,10 +105,23 @@ make -j$(sysctl -n hw.ncpu)
 | `--no-3d-delaunay` | Disable 3D Delaunay fallback | enabled |
 | `--skip-cubic` | Skip cubic search | disabled |
 | `--no-refine` | Disable mesh refinement | enabled |
-| `--verbose` | Verbose output | off |
+| `-v, --verbose` | Verbose output (shows all hole details) | off |
 | `--quiet` | Minimal output | off |
 | `--stats` | Show detailed statistics | off |
 | `--validate` | Validate mesh before/after | off |
+| `--ascii-ply` | Save PLY files in ASCII format | off (binary) |
+
+### Preprocessing Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--preprocess` | Enable all preprocessing steps | off |
+| `--no-remove-duplicates` | Disable duplicate vertex removal | enabled |
+| `--no-remove-non-manifold` | Disable non-manifold vertex removal | enabled |
+| `--no-remove-isolated` | Disable isolated vertex cleanup | enabled |
+| `--no-remove-small` | Disable small component removal | enabled |
+| `--non-manifold-passes <n>` | Number of non-manifold removal passes | 2 |
+| `--debug` | Dump intermediate meshes as binary PLY | off |
 
 ## Performance
 
@@ -142,6 +155,26 @@ make -j$(sysctl -n hw.ncpu)
 ```bash
 ./mesh_hole_filler mesh.obj result.obj --verbose --stats --validate
 ```
+
+### Preprocessing for damaged meshes
+```bash
+./mesh_hole_filler damaged.obj repaired.obj --preprocess --verbose
+```
+
+### Preprocessing with custom passes
+```bash
+./mesh_hole_filler noisy.ply clean.ply --preprocess --non-manifold-passes 3
+```
+
+### Debug mode (dump intermediate meshes)
+```bash
+./mesh_hole_filler input.obj output.obj --preprocess --debug --verbose
+```
+This creates:
+- `debug_duplicates.ply` - After duplicate vertex removal
+- `debug_nonmanifold.ply` - After non-manifold vertex removal
+- `debug_isolated.ply` - After isolated vertex removal
+- `debug_largest_component.ply` - After small component removal
 
 ## Output Example
 
@@ -225,12 +258,14 @@ MeshRepair/
 │   │   ├── hole_detector.h
 │   │   ├── hole_filler.h
 │   │   ├── mesh_validator.h
+│   │   ├── mesh_preprocessor.h
 │   │   └── progress_reporter.h
 │   ├── main.cpp
 │   ├── mesh_loader.cpp
 │   ├── hole_detector.cpp
 │   ├── hole_filler.cpp
 │   ├── mesh_validator.cpp
+│   ├── mesh_preprocessor.cpp
 │   └── progress_reporter.cpp
 ├── tests/                  # Test suite
 │   ├── CMakeLists.txt

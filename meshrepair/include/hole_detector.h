@@ -27,8 +27,9 @@ public:
     /**
      * @brief Construct hole detector for a mesh
      * @param mesh Mesh to analyze
+     * @param verbose Enable verbose output
      */
-    explicit HoleDetector(const Mesh& mesh);
+    explicit HoleDetector(const Mesh& mesh, bool verbose = false);
 
     /**
      * @brief Detect all holes in the mesh
@@ -61,6 +62,7 @@ public:
 
 private:
     const Mesh& mesh_;
+    bool verbose_;
 };
 
 } // namespace MeshRepair

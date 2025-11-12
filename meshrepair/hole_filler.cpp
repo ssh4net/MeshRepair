@@ -103,10 +103,13 @@ MeshStatistics HoleFiller::fill_all_holes(const std::vector<HoleInfo>& holes) {
         return mesh_stats;
     }
 
-    std::cout << "\nFilling " << holes.size() << " hole(s)...\n";
+    if (options_.verbose) {
+        std::cout << "\nFilling " << holes.size() << " hole(s)...\n";
+    }
 
     for (size_t i = 0; i < holes.size(); ++i) {
-        if (options_.show_progress || options_.verbose) {
+        // Only show per-hole progress in verbose mode
+        if (options_.verbose) {
             std::cout << "  Hole " << (i + 1) << "/" << holes.size()
                       << " (" << holes[i].boundary_size << " boundary vertices):\n";
         }

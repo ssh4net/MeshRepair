@@ -29,7 +29,7 @@ void print_usage(const char* program_name) {
               << "  --no-3d-delaunay       Disable 3D Delaunay fallback\n"
               << "  --skip-cubic           Skip cubic search (faster but less robust)\n"
               << "  --no-refine            Disable mesh refinement\n"
-              << "  --verbose              Verbose output\n"
+              << "  -v, --verbose          Verbose output (shows all hole details)\n"
               << "  --quiet                Minimal output\n"
               << "  --stats                Show detailed statistics\n"
               << "  --validate             Validate mesh before/after\n"
@@ -40,6 +40,7 @@ void print_usage(const char* program_name) {
               << "  --no-remove-duplicates Disable duplicate vertex removal\n"
               << "  --no-remove-non-manifold Disable non-manifold vertex removal\n"
               << "  --no-remove-isolated   Disable isolated vertex removal\n"
+              << "  --no-remove-small      Disable small component removal\n"
               << "  --non-manifold-passes <n> Number of non-manifold removal passes (default: 2)\n"
               << "  --debug                Dump intermediate meshes as binary PLY\n"
               << "\n"
@@ -64,6 +65,7 @@ struct CommandLineArgs {
     bool preprocess_remove_duplicates = true;
     bool preprocess_remove_non_manifold = true;
     bool preprocess_remove_isolated = true;
+    bool preprocess_keep_largest_component = true;
     size_t non_manifold_passes = 2;
     bool debug = false;
 
@@ -111,7 +113,7 @@ struct CommandLineArgs {
             else if (arg == "--no-refine") {
                 filling_options.refine = false;
             }
-            else if (arg == "--verbose") {
+            else if (arg == "--verbose" || arg == "-v") {
                 filling_options.verbose = true;
             }
             else if (arg == "--quiet") {
@@ -139,6 +141,9 @@ struct CommandLineArgs {
             }
             else if (arg == "--no-remove-isolated") {
                 preprocess_remove_isolated = false;
+            }
+            else if (arg == "--no-remove-small") {
+                preprocess_keep_largest_component = false;
             }
             else if (arg == "--non-manifold-passes" && i + 1 < argc) {
                 non_manifold_passes = std::stoul(argv[++i]);
@@ -173,7 +178,7 @@ int main(int argc, char** argv) {
     }
 
     // Step 1: Load mesh
-    if (!args.quiet) {
+    if (!args.quiet && args.filling_options.verbose) {
         std::cout << "Loading mesh from: " << args.input_file << "\n";
     }
 
@@ -184,6 +189,13 @@ int main(int argc, char** argv) {
     }
 
     Mesh mesh = std::move(mesh_opt.value());
+
+    if (!args.quiet && args.filling_options.verbose) {
+        std::cout << "Loaded mesh from: " << args.input_file << "\n";
+        std::cout << "  Vertices: " << mesh.number_of_vertices() << "\n";
+        std::cout << "  Faces: " << mesh.number_of_faces() << "\n";
+        std::cout << "  Edges: " << mesh.number_of_edges() << "\n\n";
+    }
 
     // Validate input mesh if requested
     if (args.validate) {
@@ -208,6 +220,7 @@ int main(int argc, char** argv) {
         prep_opts.remove_duplicates = args.preprocess_remove_duplicates;
         prep_opts.remove_non_manifold = args.preprocess_remove_non_manifold;
         prep_opts.remove_isolated = args.preprocess_remove_isolated;
+        prep_opts.keep_largest_component = args.preprocess_keep_largest_component;
         prep_opts.non_manifold_passes = args.non_manifold_passes;
         prep_opts.verbose = args.filling_options.verbose;
         prep_opts.debug = args.debug;
@@ -221,17 +234,16 @@ int main(int argc, char** argv) {
     }
 
     // Step 2: Detect holes
-    if (!args.quiet) {
-        std::cout << "\nDetecting holes...\n";
+    if (!args.quiet && args.filling_options.verbose) {
+        std::cout << "Detecting holes...\n";
     }
 
-    HoleDetector detector(mesh);
+    HoleDetector detector(mesh, args.filling_options.verbose);
     auto holes = detector.detect_all_holes();
 
     if (holes.empty()) {
         if (!args.quiet) {
             std::cout << "No holes found. Mesh is already closed.\n";
-            std::cout << "Output file will be identical to input.\n";
         }
 
         // Save anyway in case of format conversion
@@ -260,7 +272,7 @@ int main(int argc, char** argv) {
     }
 
     // Step 5: Save result
-    if (!args.quiet) {
+    if (!args.quiet && args.filling_options.verbose) {
         std::cout << "\nSaving result to: " << args.output_file;
         // Check if output is PLY format (C++17 compatible)
         size_t len = args.output_file.length();
