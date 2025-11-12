@@ -157,6 +157,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/hole_filler.cpp
     meshrepair/mesh_validator.cpp
     meshrepair/progress_reporter.cpp
+    meshrepair/mesh_preprocessor.cpp
 )
 
 # Header files
@@ -168,6 +169,7 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/hole_filler.h
     meshrepair/include/mesh_validator.h
     meshrepair/include/progress_reporter.h
+    meshrepair/include/mesh_preprocessor.h
 )
 
 # Main executable
