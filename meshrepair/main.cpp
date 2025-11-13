@@ -52,6 +52,9 @@ void print_usage(const char* program_name) {
               << "  --queue-size <n>       Pipeline queue size in holes (default: 10, legacy mode only)\n"
               << "  --no-partition         Disable partitioned parallel filling (use legacy mode)\n"
               << "\n"
+              << "Loader:\n"
+              << "  --cgal-loader          Force CGAL OBJ loader (default: RapidOBJ if available)\n"
+              << "\n"
               << "  --help                 Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " input.obj output.obj\n"
@@ -81,6 +84,9 @@ struct CommandLineArgs {
     size_t num_threads = 0;      // 0 = auto (hw_cores / 2)
     size_t queue_size = 10;      // Pipeline queue size
     bool use_partitioned = true; // Use partitioned parallel filling (default)
+
+    // Loader options
+    bool force_cgal_loader = false; // Force CGAL OBJ loader instead of RapidOBJ
 
     bool parse(int argc, char** argv) {
         if (argc < 3) {
@@ -181,6 +187,9 @@ struct CommandLineArgs {
             else if (arg == "--no-partition") {
                 use_partitioned = false;
             }
+            else if (arg == "--cgal-loader") {
+                force_cgal_loader = true;
+            }
             else {
                 std::cout << "Unknown option: " << arg << "\n";
                 return false;
@@ -208,7 +217,7 @@ int main(int argc, char** argv) {
         std::cout << "Loading mesh from: " << args.input_file << "\n";
     }
 
-    auto mesh_opt = MeshLoader::load(args.input_file);
+    auto mesh_opt = MeshLoader::load(args.input_file, MeshLoader::Format::AUTO, args.force_cgal_loader);
     if (!mesh_opt) {
         std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
         return 1;

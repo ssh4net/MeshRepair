@@ -152,6 +152,15 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/meshrepair/include
 )
 
+# Find RapidOBJ (header-only library for fast OBJ parsing)
+find_package(RapidOBJ QUIET)
+if(RapidOBJ_FOUND)
+    message(STATUS "RapidOBJ found: ${RapidOBJ_INCLUDE_DIR}")
+    add_definitions(-DHAVE_RAPIDOBJ)
+else()
+    message(STATUS "RapidOBJ not found - OBJ loading will use CGAL parser (slower)")
+endif()
+
 # Source files
 set(MESHREPAIR_SOURCES
     meshrepair/main.cpp
@@ -203,6 +212,10 @@ target_link_libraries(mesh_hole_filler
     Eigen3::Eigen
     Threads::Threads
 )
+
+if(RapidOBJ_FOUND)
+    target_link_libraries(mesh_hole_filler RapidOBJ::RapidOBJ)
+endif()
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(mesh_hole_filler OpenMP::OpenMP_CXX)
@@ -272,6 +285,11 @@ if(Boost_FOUND)
     message(STATUS "  Boost: ${Boost_VERSION}")
 endif()
 message(STATUS "  OpenMP: ${OpenMP_CXX_FOUND}")
+if(RapidOBJ_FOUND)
+    message(STATUS "  RapidOBJ: ${RapidOBJ_INCLUDE_DIR}")
+else()
+    message(STATUS "  RapidOBJ: NOT FOUND (will use CGAL OBJ parser)")
+endif()
 message(STATUS "")
 message(STATUS "Options:")
 message(STATUS "  Build tests: ${BUILD_TESTS}")

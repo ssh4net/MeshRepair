@@ -25,10 +25,12 @@ public:
      * @brief Load mesh from file
      * @param filename Path to mesh file
      * @param format File format (AUTO for auto-detection)
+     * @param force_cgal_loader Force CGAL OBJ loader instead of RapidOBJ (default: false)
      * @return Loaded mesh on success, std::nullopt on failure
      */
     static std::optional<Mesh> load(const std::string& filename,
-                                     Format format = Format::AUTO);
+                                     Format format = Format::AUTO,
+                                     bool force_cgal_loader = false);
 
     /**
      * @brief Save mesh to file
@@ -59,6 +61,15 @@ public:
 private:
     static Format detect_format(const std::string& filename);
     static std::string last_error_;
+
+#ifdef HAVE_RAPIDOBJ
+    /**
+     * @brief Load OBJ file using RapidOBJ parser (10-50x faster than CGAL)
+     * @param filename Path to OBJ file
+     * @return Loaded mesh on success, std::nullopt on failure
+     */
+    static std::optional<Mesh> load_obj_rapidobj(const std::string& filename);
+#endif
 };
 
 } // namespace MeshRepair
