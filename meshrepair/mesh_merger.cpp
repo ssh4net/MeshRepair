@@ -1,7 +1,9 @@
 #include "mesh_merger.h"
+#include "polygon_soup_repair.h"
 #include <CGAL/Polygon_mesh_processing/polygon_mesh_to_polygon_soup.h>
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
 #include <CGAL/Polygon_mesh_processing/repair_polygon_soup.h>
+#include <CGAL/Polygon_mesh_processing/orient_polygon_soup.h>
 #include <iostream>
 
 namespace MeshRepair {
@@ -94,7 +96,24 @@ Mesh MeshMerger::merge_submeshes(
                   << "(duplicates merged)\n";
     }
 
-    // Step 4: Convert back to mesh
+    // Step 4: Remove non-manifold polygons (MUST be done before orient!)
+    size_t removed_non_manifold = PolygonSoupRepair::remove_non_manifold_polygons(combined.polygons);
+
+    if (removed_non_manifold > 0) {
+        if (verbose) {
+            std::cout << "[Merger] Removed " << removed_non_manifold
+                      << " non-manifold polygon(s)\n";
+        }
+    }
+
+    // Step 5: Orient soup (required for mesh conversion)
+    bool oriented = PMP::orient_polygon_soup(combined.points, combined.polygons);
+
+    if (!oriented && verbose) {
+        std::cout << "[Merger] Warning: Some points were duplicated during orientation\n";
+    }
+
+    // Step 6: Convert back to mesh
     Mesh result = soup_to_mesh(combined);
 
     if (verbose) {

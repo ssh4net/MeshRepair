@@ -1,10 +1,12 @@
 #include "mesh_preprocessor.h"
 #include "parallel_detection.h"
 #include "threadpool.h"
+#include "polygon_soup_repair.h"
 #include <CGAL/Polygon_mesh_processing/manifoldness.h>
 #include <CGAL/Polygon_mesh_processing/repair.h>
 #include <CGAL/Polygon_mesh_processing/repair_degeneracies.h>
 #include <CGAL/Polygon_mesh_processing/repair_polygon_soup.h>
+#include <CGAL/Polygon_mesh_processing/orient_polygon_soup.h>
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
 #include <CGAL/Polygon_mesh_processing/merge_border_vertices.h>
 #include <CGAL/Polygon_mesh_processing/connected_components.h>
@@ -322,16 +324,55 @@ size_t MeshPreprocessor::remove_duplicate_vertices() {
         std::cout << "  [DEBUG]   Polygons remaining: " << polygons.size() << "\n";
     }
 
-    // Step 5: DO NOT orient polygons here!
-    // orient_polygon_soup() duplicates points to make the soup manifold,
-    // which would UNDO our duplicate removal. We want non-manifold vertices
-    // to be DELETED in the next step, not split back to original state.
-    // Orientation will be handled later if needed.
+    // Step 4.5: Remove non-manifold vertices/edges in polygon soup
+    // This MUST be done BEFORE orient to avoid point duplication
+    size_t removed_non_manifold = PolygonSoupRepair::remove_non_manifold_polygons(polygons);
+
+    if (options_.verbose || options_.debug) {
+        if (removed_non_manifold > 0) {
+            std::cout << "  Removed " << removed_non_manifold
+                      << " polygon(s) with non-manifold vertices/edges\n";
+        } else if (options_.debug) {
+            std::cout << "  [DEBUG] No non-manifold polygons found\n";
+        }
+    }
+
+    // Step 5: Orient polygon soup (required for safe mesh conversion)
+    // Now that we've removed non-manifold vertices, we can safely orient.
+    // orient_polygon_soup() may still duplicate some points if needed for manifoldness,
+    // but this is necessary to avoid crashes in polygon_soup_to_polygon_mesh().
 
     if (options_.debug) {
-        std::cout << "  [DEBUG] Skipping orient_polygon_soup (would duplicate points)\n";
+        std::cout << "  [DEBUG] Before orient_polygon_soup:\n";
         std::cout << "  [DEBUG]   Points: " << points.size() << "\n";
         std::cout << "  [DEBUG]   Polygons: " << polygons.size() << "\n";
+
+        // Debug dump: soup before orient
+        std::string debug_file = "debug_05_preprocess_soup_before_orient.ply";
+        Mesh debug_mesh;
+        PMP::polygon_soup_to_polygon_mesh(points, polygons, debug_mesh);
+
+        if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
+            std::cout << "  [DEBUG] Saved soup (before orient): " << debug_file << "\n";
+            std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
+                      << debug_mesh.number_of_faces() << " faces\n";
+        }
+    }
+
+    bool oriented = PMP::orient_polygon_soup(points, polygons);
+
+    if (options_.verbose || options_.debug) {
+        if (oriented) {
+            std::cout << "  Oriented polygon soup successfully\n";
+        } else {
+            std::cout << "  Warning: Some points were duplicated during orientation\n";
+        }
+
+        if (options_.debug) {
+            std::cout << "  [DEBUG] After orient_polygon_soup:\n";
+            std::cout << "  [DEBUG]   Points: " << points.size() << "\n";
+            std::cout << "  [DEBUG]   Polygons: " << polygons.size() << "\n";
+        }
     }
 
     // Step 6: Validate soup before conversion (DEBUG SAFETY CHECK)

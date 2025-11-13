@@ -25,7 +25,7 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
 
     // Debug: Save original mesh before partitioning
     if (debug) {
-        std::string debug_file = "debug_05_partition_input.ply";
+        std::string debug_file = "debug_06_partition_input.ply";
         if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
             if (verbose) {
                 std::cout << "  [DEBUG] Saved original mesh: " << debug_file << "\n";
