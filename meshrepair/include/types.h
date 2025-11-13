@@ -29,6 +29,7 @@ struct HoleStatistics {
     bool filled_successfully = false;
     bool fairing_succeeded = false;
     double fill_time_ms = 0.0;
+    std::string error_message;  // Exception message if filling failed
 };
 
 // Overall mesh repair statistics

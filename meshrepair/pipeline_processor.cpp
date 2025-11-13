@@ -1,5 +1,6 @@
 #include "pipeline_processor.h"
 #include "parallel_detection.h"
+#include "thread_safe_cout.h"
 #include <iostream>
 #include <chrono>
 #include <unordered_set>
@@ -44,39 +45,127 @@ MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
 
     // Start detection in background (producer)
     auto& detection_pool = thread_manager_.get_detection_pool();
+
+    if (verbose) {
+        std::cout << "[Pipeline] Enqueueing detection task...\n";
+    }
+
     auto detection_future = detection_pool.enqueue(
         [this, &hole_queue, &detection_done, &holes_detected, verbose]() {
+            if (verbose) {
+                thread_safe_cout() << "[Pipeline] Detection thread started\n";
+            }
             detect_holes_async(hole_queue, detection_done, holes_detected);
+            if (verbose) {
+                thread_safe_cout() << "[Pipeline] Detection thread finished\n";
+            }
         }
     );
+
+    if (verbose) {
+        std::cout << "[Pipeline] Detection task enqueued\n";
+    }
 
     // Start filling threads (consumers)
     auto& filling_pool = thread_manager_.get_filling_pool();
     std::vector<std::future<void>> filling_futures;
 
+    if (verbose) {
+        std::cout << "[Pipeline] Enqueueing " << thread_manager_.get_filling_threads() << " filling tasks...\n";
+    }
+
     for (size_t i = 0; i < thread_manager_.get_filling_threads(); ++i) {
+        if (verbose) {
+            std::cout << "[Pipeline] Enqueueing filling task " << i << "...\n";
+        }
+
         filling_futures.push_back(
             filling_pool.enqueue(
-                [this, &hole_queue, &detection_done, &results, &results_mutex]() {
+                [this, &hole_queue, &detection_done, &results, &results_mutex, i, verbose]() {
+                    if (verbose) {
+                        thread_safe_cout() << "[Pipeline] Filling thread " << i << " started\n";
+                    }
                     fill_holes_async(hole_queue, detection_done, results, results_mutex);
+                    if (verbose) {
+                        thread_safe_cout() << "[Pipeline] Filling thread " << i << " finished\n";
+                    }
                 }
             )
         );
+
+        if (verbose) {
+            std::cout << "[Pipeline] Filling task " << i << " enqueued\n";
+        }
+    }
+
+    if (verbose) {
+        std::cout << "[Pipeline] All tasks enqueued\n";
     }
 
     // Wait for detection to complete
-    detection_future.get();
+    if (verbose) {
+        std::cout << "[Pipeline] Waiting for detection thread to complete...\n";
+    }
+
+    try {
+        detection_future.get();
+
+        if (verbose) {
+            std::cout << "[Pipeline] Detection thread completed successfully\n";
+        }
+    } catch (const std::exception& e) {
+        std::cout << "[Pipeline] ERROR: Detection thread threw exception: " << e.what() << "\n";
+        // Signal filling threads to stop
+        hole_queue.finish();
+        // Wait for filling threads to exit
+        for (auto& f : filling_futures) {
+            try { f.get(); } catch (...) {}
+        }
+        throw;  // Re-throw to caller
+    } catch (...) {
+        std::cout << "[Pipeline] ERROR: Detection thread threw unknown exception\n";
+        hole_queue.finish();
+        for (auto& f : filling_futures) {
+            try { f.get(); } catch (...) {}
+        }
+        throw;
+    }
 
     // Signal filling threads that no more holes are coming
+    if (verbose) {
+        std::cout << "[Pipeline] About to call hole_queue.finish()...\n";
+    }
+
     hole_queue.finish();
 
     if (verbose) {
-        std::cout << "[Pipeline] Detection complete, waiting for filling to finish...\n";
+        std::cout << "[Pipeline] hole_queue.finish() completed, waiting for filling to finish...\n";
     }
 
     // Wait for all filling to complete
-    for (auto& f : filling_futures) {
-        f.get();
+    if (verbose) {
+        std::cout << "[Pipeline] Waiting for " << filling_futures.size() << " filling thread(s) to complete...\n";
+    }
+
+    for (size_t i = 0; i < filling_futures.size(); ++i) {
+        try {
+            if (verbose) {
+                std::cout << "[Pipeline] Waiting for filling thread " << i << "...\n";
+            }
+            filling_futures[i].get();
+            if (verbose) {
+                std::cout << "[Pipeline] Filling thread " << i << " completed\n";
+            }
+        } catch (const std::exception& e) {
+            std::cout << "[Pipeline] ERROR: Filling thread " << i << " threw exception: "
+                      << e.what() << "\n";
+        } catch (...) {
+            std::cout << "[Pipeline] ERROR: Filling thread " << i << " threw unknown exception\n";
+        }
+    }
+
+    if (verbose) {
+        std::cout << "[Pipeline] All filling threads completed\n";
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -173,6 +262,9 @@ void PipelineProcessor::fill_holes_async(
     std::vector<HoleStatistics>& results,
     std::mutex& results_mutex)
 {
+    // Suppress unused parameter warning - detection_done was used for debug output
+    (void)detection_done;
+
     // Note: CGAL mesh is NOT thread-safe for concurrent writes!
     // Strategy: All threads can READ mesh concurrently
     // But WRITE operations must be serialized
@@ -182,6 +274,10 @@ void PipelineProcessor::fill_holes_async(
     // Future optimization: separate computation from application.
 
     static std::mutex mesh_modification_mutex;
+
+    // CRITICAL: Also need mutex for console output to prevent race conditions
+    // Windows console I/O is particularly sensitive to multi-threaded writes
+    static std::mutex console_mutex;
 
     while (true) {
         HoleInfo hole;
@@ -198,18 +294,58 @@ void PipelineProcessor::fill_holes_async(
         // 1. Compute triangulation without modifying mesh (parallel-safe)
         // 2. Apply triangulation result (sequential, but fast)
         HoleStatistics stats;
-        {
-            std::lock_guard<std::mutex> lock(mesh_modification_mutex);
+
+        // CRITICAL: Use try-catch to ensure mutex is ALWAYS released even if CGAL crashes
+        try {
+            std::unique_lock<std::mutex> lock(mesh_modification_mutex);
+
+            // Temporarily disable verbose output during parallel filling
+            // to avoid console I/O race conditions
+            FillingOptions non_verbose_opts = filling_options_;
+            non_verbose_opts.verbose = false;
 
             // Create filler for this thread
-            HoleFiller filler(mesh_, filling_options_);
+            HoleFiller filler(mesh_, non_verbose_opts);
+
             stats = filler.fill_hole(hole);
+
+            // Explicitly unlock before exception handling
+            lock.unlock();
+        } catch (const std::exception& e) {
+            // CGAL threw an exception - mesh might be corrupted, but at least unlock
+            thread_safe_cerr() << "  [ERROR] Exception during fill_hole: " << e.what() << "\n";
+            stats.filled_successfully = false;
+            stats.error_message = std::string("Exception: ") + e.what();
+        } catch (...) {
+            // Unknown exception - likely CGAL internal error
+            thread_safe_cerr() << "  [ERROR] Unknown exception during fill_hole\n";
+            stats.filled_successfully = false;
+            stats.error_message = "Unknown exception during hole filling";
         }
 
-        // Store result
+        // Store result (and optionally print with synchronized console access)
         {
             std::lock_guard<std::mutex> lock(results_mutex);
+
             results.push_back(stats);
+
+            // If verbose mode is enabled, print result with thread-safe output
+            if (filling_options_.verbose) {
+                if (stats.filled_successfully) {
+                    thread_safe_cout() << "  [Pipeline] Hole filled: "
+                                       << stats.num_faces_added << " faces, "
+                                       << stats.num_vertices_added << " vertices added"
+                                       << (stats.fairing_succeeded ? "" : " [FAIRING FAILED]")
+                                       << "\n";
+                } else {
+                    // Failure - show error message
+                    if (!stats.error_message.empty()) {
+                        thread_safe_cout() << "  [Pipeline] Hole filling FAILED: " << stats.error_message << "\n";
+                    } else {
+                        thread_safe_cout() << "  [Pipeline] Hole filling FAILED\n";
+                    }
+                }
+            }
         }
     }
 }

@@ -6,6 +6,7 @@
 #include "mesh_preprocessor.h"
 #include "thread_manager.h"
 #include "pipeline_processor.h"
+#include "parallel_hole_filler.h"
 #include "config.h"
 
 #include <iostream>
@@ -48,7 +49,8 @@ void print_usage(const char* program_name) {
               << "\n"
               << "Threading:\n"
               << "  --threads <n>          Number of worker threads (default: hw_cores/2, 0 = auto)\n"
-              << "  --queue-size <n>       Pipeline queue size in holes (default: 10)\n"
+              << "  --queue-size <n>       Pipeline queue size in holes (default: 10, legacy mode only)\n"
+              << "  --no-partition         Disable partitioned parallel filling (use legacy mode)\n"
               << "\n"
               << "  --help                 Show this help message\n\n"
               << "Examples:\n"
@@ -78,6 +80,7 @@ struct CommandLineArgs {
     // Threading options
     size_t num_threads = 0;      // 0 = auto (hw_cores / 2)
     size_t queue_size = 10;      // Pipeline queue size
+    bool use_partitioned = true; // Use partitioned parallel filling (default)
 
     bool parse(int argc, char** argv) {
         if (argc < 3) {
@@ -101,7 +104,7 @@ struct CommandLineArgs {
             if (arg == "--continuity" && i + 1 < argc) {
                 filling_options.fairing_continuity = std::stoi(argv[++i]);
                 if (filling_options.fairing_continuity > 2) {
-                    std::cerr << "Error: Continuity must be 0, 1, or 2\n";
+                    std::cout << "Error: Continuity must be 0, 1, or 2\n";
                     return false;
                 }
             }
@@ -158,7 +161,7 @@ struct CommandLineArgs {
             else if (arg == "--non-manifold-passes" && i + 1 < argc) {
                 non_manifold_passes = std::stoul(argv[++i]);
                 if (non_manifold_passes == 0) {
-                    std::cerr << "Error: Non-manifold passes must be at least 1\n";
+                    std::cout << "Error: Non-manifold passes must be at least 1\n";
                     return false;
                 }
             }
@@ -171,12 +174,15 @@ struct CommandLineArgs {
             else if (arg == "--queue-size" && i + 1 < argc) {
                 queue_size = std::stoul(argv[++i]);
                 if (queue_size == 0) {
-                    std::cerr << "Error: Queue size must be at least 1\n";
+                    std::cout << "Error: Queue size must be at least 1\n";
                     return false;
                 }
             }
+            else if (arg == "--no-partition") {
+                use_partitioned = false;
+            }
             else {
-                std::cerr << "Unknown option: " << arg << "\n";
+                std::cout << "Unknown option: " << arg << "\n";
                 return false;
             }
         }
@@ -204,7 +210,7 @@ int main(int argc, char** argv) {
 
     auto mesh_opt = MeshLoader::load(args.input_file);
     if (!mesh_opt) {
-        std::cerr << "Error: " << MeshLoader::get_last_error() << "\n";
+        std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
         return 1;
     }
 
@@ -233,17 +239,29 @@ int main(int argc, char** argv) {
         MeshValidator::print_statistics(mesh, true);
 
         if (!MeshValidator::is_valid(mesh)) {
-            std::cerr << "Warning: Input mesh failed validity checks\n";
+            std::cout << "Warning: Input mesh failed validity checks\n";
         }
 
         if (!MeshValidator::is_triangle_mesh(mesh)) {
-            std::cerr << "Error: Mesh must be a triangle mesh\n";
+            std::cout << "Error: Mesh must be a triangle mesh\n";
             return 1;
         }
     }
 
     // Step 1.5: Preprocess mesh if requested
     if (args.enable_preprocessing) {
+        // Debug: Save original loaded mesh before any preprocessing
+        if (args.debug) {
+            std::string debug_file = "debug_original_loaded.ply";
+            if (CGAL::IO::write_PLY(debug_file, mesh, CGAL::parameters::use_binary_mode(true))) {
+                if (!args.quiet) {
+                    std::cout << "  [DEBUG] Saved original loaded mesh: " << debug_file << "\n";
+                    std::cout << "  [DEBUG]   Vertices: " << mesh.number_of_vertices() << "\n";
+                    std::cout << "  [DEBUG]   Faces: " << mesh.number_of_faces() << "\n\n";
+                }
+            }
+        }
+
         PreprocessingOptions prep_opts;
         prep_opts.remove_duplicates = args.preprocess_remove_duplicates;
         prep_opts.remove_non_manifold = args.preprocess_remove_non_manifold;
@@ -262,15 +280,34 @@ int main(int argc, char** argv) {
     }
 
     // Step 2 & 3: Detect and fill holes (with threading)
-    PipelineProcessor processor(mesh, thread_manager, args.filling_options);
-
     MeshStatistics stats;
-    if (thread_manager.get_total_threads() > 1) {
-        // Use pipeline processing for parallel execution
-        stats = processor.process_pipeline(args.filling_options.verbose);
-    } else {
-        // Single-threaded batch processing
-        stats = processor.process_batch(args.filling_options.verbose);
+
+    if (args.use_partitioned) {
+        // Use partitioned parallel filling (default mode)
+        if (!args.quiet && args.filling_options.verbose) {
+            std::cout << "\n=== Partitioned Parallel Filling (Default) ===\n";
+        }
+
+        ParallelHoleFillerPipeline partitioned_processor(
+            mesh, thread_manager, args.filling_options);
+
+        stats = partitioned_processor.process_partitioned(args.filling_options.verbose);
+    }
+    else {
+        // Use legacy pipeline processing
+        if (!args.quiet && args.filling_options.verbose) {
+            std::cout << "\n=== Legacy Pipeline Mode ===\n";
+        }
+
+        PipelineProcessor processor(mesh, thread_manager, args.filling_options);
+
+        if (thread_manager.get_total_threads() > 1) {
+            // Use pipeline processing for parallel execution
+            stats = processor.process_pipeline(args.filling_options.verbose);
+        } else {
+            // Single-threaded batch processing
+            stats = processor.process_batch(args.filling_options.verbose);
+        }
     }
 
     // Check if no holes were found
@@ -281,7 +318,7 @@ int main(int argc, char** argv) {
 
         // Save anyway in case of format conversion
         if (!MeshLoader::save(mesh, args.output_file)) {
-            std::cerr << "Error: " << MeshLoader::get_last_error() << "\n";
+            std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
             return 1;
         }
 
@@ -296,7 +333,7 @@ int main(int argc, char** argv) {
         MeshValidator::print_statistics(mesh, true);
 
         if (!MeshValidator::is_valid(mesh)) {
-            std::cerr << "Warning: Output mesh failed validity checks\n";
+            std::cout << "Warning: Output mesh failed validity checks\n";
         }
     }
 
@@ -317,7 +354,7 @@ int main(int argc, char** argv) {
     // Binary PLY by default, ASCII if requested
     bool use_binary_ply = !args.ascii_ply;
     if (!MeshLoader::save(mesh, args.output_file, MeshLoader::Format::AUTO, use_binary_ply)) {
-        std::cerr << "Error: " << MeshLoader::get_last_error() << "\n";
+        std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
         return 1;
     }
 

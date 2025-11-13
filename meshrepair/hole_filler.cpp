@@ -73,15 +73,22 @@ HoleStatistics HoleFiller::fill_hole(const HoleInfo& hole) {
         } else {
             stats.filled_successfully = false;
             stats.fairing_succeeded = false;
+            stats.error_message = "CGAL triangulation failed (possibly degenerate or self-intersecting boundary)";
 
             if (options_.verbose) {
-                std::cout << "    Failed to triangulate hole\n";
+                std::cout << "    Failed to triangulate hole (boundary may be degenerate)\n";
             }
         }
     } catch (const std::exception& e) {
         stats.filled_successfully = false;
         stats.fairing_succeeded = false;
-        std::cerr << "    Exception during hole filling: " << e.what() << "\n";
+        // Save exception message for later reporting (avoid race condition on std::cout)
+        stats.error_message = e.what();
+
+        // Only print immediately if not in multi-threaded mode
+        if (options_.verbose) {
+            std::cout << "    Exception during hole filling: " << e.what() << "\n";
+        }
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();

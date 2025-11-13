@@ -163,6 +163,10 @@ set(MESHREPAIR_SOURCES
     meshrepair/mesh_preprocessor.cpp
     meshrepair/thread_manager.cpp
     meshrepair/pipeline_processor.cpp
+    meshrepair/mesh_partitioner.cpp
+    meshrepair/submesh_extractor.cpp
+    meshrepair/mesh_merger.cpp
+    meshrepair/parallel_hole_filler.cpp
 )
 
 # Header files
@@ -180,6 +184,11 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/pipeline_processor.h
     meshrepair/include/parallel_utils.h
     meshrepair/include/parallel_detection.h
+    meshrepair/include/mesh_partitioner.h
+    meshrepair/include/submesh_extractor.h
+    meshrepair/include/mesh_merger.h
+    meshrepair/include/parallel_hole_filler.h
+    meshrepair/include/thread_safe_cout.h
 )
 
 # Main executable

@@ -137,23 +137,42 @@ public:
 
     // Pop item, returns false if finished
     bool pop(T& item) {
-        std::unique_lock<std::mutex> lock(mtx_);
-        cv_pop_.wait(lock, [this] { return !queue_.empty() || finished_; });
+        try {
+            std::unique_lock<std::mutex> lock(mtx_);
 
-        if (queue_.empty() && finished_) {
+            // Wait with timeout to avoid infinite hang on Windows
+            while (!finished_ && queue_.empty()) {
+                auto result = cv_pop_.wait_for(lock, std::chrono::milliseconds(100));
+
+                // After wait (timeout or notification), recheck the actual state
+                // Don't continue if finished, even on timeout
+                if (finished_) {
+                    break;
+                }
+
+                // If not finished and queue is still empty, continue waiting
+            }
+
+            if (queue_.empty() && finished_) {
+                return false;
+            }
+
+            if (!queue_.empty()) {
+                item = std::move(queue_.front());
+                queue_.pop();
+                size_t item_memory = get_memory_usage(item);
+                current_memory_bytes_ -= item_memory;
+                cv_push_.notify_one();
+                return true;
+            }
+
+            return false;
+        } catch (const std::exception& e) {
+            // Exception in pop - return false to exit thread
+            return false;
+        } catch (...) {
             return false;
         }
-
-        if (!queue_.empty()) {
-            item = std::move(queue_.front());
-            queue_.pop();
-            size_t item_memory = get_memory_usage(item);
-            current_memory_bytes_ -= item_memory;
-            cv_push_.notify_one();
-            return true;
-        }
-
-        return false;
     }
 
     // Mark as finished
@@ -387,10 +406,11 @@ private:
                 task();
             }
             catch (const std::exception& e) {
-                std::cerr << "[ThreadPool] Task exception: " << e.what() << "\n";
+                // Silently ignore exceptions - they're already handled in the task
+                // Adding output here causes Windows console deadlock
             }
             catch (...) {
-                std::cerr << "[ThreadPool] Task exception: unknown\n";
+                // Silently ignore unknown exceptions
             }
 
             {

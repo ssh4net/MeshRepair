@@ -48,17 +48,11 @@ PreprocessingStats MeshPreprocessor::preprocess() {
         stats_.duplicates_merged = remove_duplicate_vertices();
         if (options_.verbose) {
             std::cout << "  Merged: " << stats_.duplicates_merged << " vertices\n";
-        }
-
-        // Remove degenerate faces created by duplicate merging
-        if (options_.verbose) {
-            std::cout << "  Removing degenerate faces...\n";
-        }
-        PMP::remove_degenerate_faces(mesh_);
-
-        if (options_.verbose) {
             std::cout << "\n";
         }
+
+        // NOTE: Degenerate faces are already removed during polygon soup processing
+        // in remove_duplicate_vertices(), so no need to call remove_degenerate_faces() here
 
         // Debug: dump intermediate mesh
         if (options_.debug) {
@@ -72,7 +66,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
                 }
             } else {
-                std::cerr << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
+                std::cout << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
             }
         }
     }
@@ -147,7 +141,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
                 }
             } else {
-                std::cerr << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
+                std::cout << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
             }
         }
     }
@@ -175,7 +169,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
                 }
             } else {
-                std::cerr << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
+                std::cout << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
             }
         }
     }
@@ -203,7 +197,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
                 }
             } else {
-                std::cerr << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
+                std::cout << "  [DEBUG] Warning: Failed to save " << debug_file << "\n\n";
             }
         }
     }
@@ -226,8 +220,8 @@ PreprocessingStats MeshPreprocessor::preprocess() {
     }
     bool is_valid = CGAL::is_valid_polygon_mesh(mesh_, options_.verbose);
     if (!is_valid) {
-        std::cerr << "WARNING: Mesh is not valid after preprocessing!\n";
-        std::cerr << "The mesh may have topological issues. Attempting to continue anyway...\n";
+        std::cout << "WARNING: Mesh is not valid after preprocessing!\n";
+        std::cout << "The mesh may have topological issues. Attempting to continue anyway...\n";
     }
 
     if (options_.verbose) {
@@ -245,6 +239,12 @@ PreprocessingStats MeshPreprocessor::preprocess() {
 
 size_t MeshPreprocessor::remove_duplicate_vertices() {
     size_t initial_vertices = mesh_.number_of_vertices();
+
+    if (options_.debug) {
+        std::cout << "  [DEBUG] Starting duplicate removal:\n";
+        std::cout << "  [DEBUG]   Initial vertices: " << initial_vertices << "\n";
+        std::cout << "  [DEBUG]   Initial faces: " << mesh_.number_of_faces() << "\n";
+    }
 
     // PROPER METHOD: Convert mesh to polygon soup, clean it, rebuild mesh
     // This is the ONLY SAFE way to remove ALL duplicate vertices (boundary AND interior)
@@ -270,19 +270,98 @@ size_t MeshPreprocessor::remove_duplicate_vertices() {
         polygons.push_back(polygon);
     }
 
+    if (options_.debug) {
+        std::cout << "  [DEBUG] Extracted polygon soup:\n";
+        std::cout << "  [DEBUG]   Points: " << points.size() << "\n";
+        std::cout << "  [DEBUG]   Polygons: " << polygons.size() << "\n";
+    }
+
     // Step 2: Merge duplicate points in polygon soup
-    // This is CGAL's SAFE method for removing ALL duplicates
+    // IMPORTANT: This will create non-manifold vertices in the resulting mesh,
+    // which will be deleted in the next preprocessing step (remove_non_manifold_vertices)
     PMP::merge_duplicate_points_in_polygon_soup(points, polygons);
 
-    // Step 3: Remove duplicate polygons (if any)
+    // COUNT HERE: After merge, track how many duplicates were removed
+    size_t vertices_after_merge = points.size();
+
+    if (options_.debug) {
+        std::cout << "  [DEBUG] After merge_duplicate_points_in_polygon_soup:\n";
+        std::cout << "  [DEBUG]   Points: " << vertices_after_merge << "\n";
+        std::cout << "  [DEBUG]   Polygons: " << polygons.size() << "\n";
+        std::cout << "  [DEBUG]   Duplicates merged: " << (initial_vertices - vertices_after_merge) << "\n";
+    }
+
+    // Step 3: Merge duplicate polygons
+    size_t before_polygon_merge = polygons.size();
     PMP::merge_duplicate_polygons_in_polygon_soup(points, polygons);
 
-    // Step 4: Rebuild mesh from cleaned polygon soup
+    if (options_.debug) {
+        std::cout << "  [DEBUG] After merge_duplicate_polygons_in_polygon_soup:\n";
+        std::cout << "  [DEBUG]   Duplicate polygons removed: " << (before_polygon_merge - polygons.size()) << "\n";
+    }
+
+    // Step 4: CRITICAL - Remove degenerate polygons manually
+    // merge_duplicate_points can create degenerate faces (e.g., [v0, v42, v42])
+    // We MUST remove these, but we DON'T use repair_polygon_soup() because
+    // it would split non-manifold vertices back to original state!
+    size_t before_cleanup = polygons.size();
+    auto it = std::remove_if(polygons.begin(), polygons.end(),
+        [](const std::vector<std::size_t>& poly) {
+            // Remove polygons with < 3 vertices
+            if (poly.size() < 3) return true;
+
+            // Remove polygons with < 3 UNIQUE vertices (degenerates)
+            std::set<std::size_t> unique_verts(poly.begin(), poly.end());
+            return unique_verts.size() < 3;
+        });
+    polygons.erase(it, polygons.end());
+
+    if (options_.debug) {
+        std::cout << "  [DEBUG] After manual degenerate removal:\n";
+        std::cout << "  [DEBUG]   Degenerate faces removed: " << (before_cleanup - polygons.size()) << "\n";
+        std::cout << "  [DEBUG]   Polygons remaining: " << polygons.size() << "\n";
+    }
+
+    // Step 5: DO NOT orient polygons here!
+    // orient_polygon_soup() duplicates points to make the soup manifold,
+    // which would UNDO our duplicate removal. We want non-manifold vertices
+    // to be DELETED in the next step, not split back to original state.
+    // Orientation will be handled later if needed.
+
+    if (options_.debug) {
+        std::cout << "  [DEBUG] Skipping orient_polygon_soup (would duplicate points)\n";
+        std::cout << "  [DEBUG]   Points: " << points.size() << "\n";
+        std::cout << "  [DEBUG]   Polygons: " << polygons.size() << "\n";
+    }
+
+    // Step 6: Validate soup before conversion (DEBUG SAFETY CHECK)
+    if (options_.verbose || options_.debug) {
+        bool is_valid = PMP::is_polygon_soup_a_polygon_mesh(polygons);
+        if (!is_valid) {
+            std::cout << "  [ERROR] Polygon soup validation failed!\n";
+            std::cout << "  The soup may have non-manifold edges or invalid topology.\n";
+            std::cout << "  Attempting to continue anyway...\n";
+            // Don't abort - we'll try to build the mesh and let non-manifold removal fix it
+        } else if (options_.debug) {
+            std::cout << "  [DEBUG] Polygon soup validation: PASSED\n";
+        }
+    }
+
+    // Step 7: Rebuild mesh from polygon soup
+    // NOTE: This WILL create non-manifold vertices (expected behavior)
+    // They will be removed in the next preprocessing step
     mesh_.clear();
     PMP::polygon_soup_to_polygon_mesh(points, polygons, mesh_);
 
-    size_t final_vertices = mesh_.number_of_vertices();
-    return initial_vertices > final_vertices ? (initial_vertices - final_vertices) : 0;
+    if (options_.debug) {
+        std::cout << "  [DEBUG] After polygon_soup_to_polygon_mesh:\n";
+        std::cout << "  [DEBUG]   Final vertices: " << mesh_.number_of_vertices() << "\n";
+        std::cout << "  [DEBUG]   Final faces: " << mesh_.number_of_faces() << "\n";
+    }
+
+    // Return count of duplicates merged (before repair, not after final cleanup)
+    return initial_vertices > vertices_after_merge ?
+           (initial_vertices - vertices_after_merge) : 0;
 }
 
 size_t MeshPreprocessor::remove_non_manifold_vertices() {
