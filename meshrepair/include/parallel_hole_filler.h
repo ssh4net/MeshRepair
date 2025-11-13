@@ -26,8 +26,9 @@ public:
 
     /// Process mesh using partitioned parallel approach
     /// @param verbose Print progress information
+    /// @param debug Dump intermediate meshes as PLY files
     /// @return Statistics about the processing
-    MeshStatistics process_partitioned(bool verbose);
+    MeshStatistics process_partitioned(bool verbose, bool debug = false);
 
 private:
     Mesh& mesh_;

@@ -1,6 +1,9 @@
 #include "parallel_hole_filler.h"
+#include <CGAL/IO/PLY.h>
 #include <iostream>
 #include <chrono>
+#include <sstream>
+#include <iomanip>
 
 namespace MeshRepair {
 
@@ -13,12 +16,22 @@ ParallelHoleFillerPipeline::ParallelHoleFillerPipeline(
     , filling_options_(filling_options)
 {}
 
-MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose) {
+MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug) {
     auto start_time = std::chrono::high_resolution_clock::now();
 
     MeshStatistics stats;
     stats.original_vertices = mesh_.number_of_vertices();
     stats.original_faces = mesh_.number_of_faces();
+
+    // Debug: Save original mesh before partitioning
+    if (debug) {
+        std::string debug_file = "debug_05_partition_input.ply";
+        if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
+            if (verbose) {
+                std::cout << "  [DEBUG] Saved original mesh: " << debug_file << "\n";
+            }
+        }
+    }
 
     // Phase 1: Detect holes (sequential)
     if (verbose) {
@@ -96,6 +109,24 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose) {
         }
     }
 
+    // Debug: Save extracted partitions (before filling)
+    if (debug) {
+        for (size_t i = 0; i < submeshes.size(); ++i) {
+            std::ostringstream oss;
+            oss << "debug_06_partition_" << std::setw(3) << std::setfill('0') << i
+                << "_unfilled.ply";
+            std::string debug_file = oss.str();
+
+            if (CGAL::IO::write_PLY(debug_file, submeshes[i].mesh,
+                                   CGAL::parameters::use_binary_mode(true))) {
+                if (verbose) {
+                    std::cout << "  [DEBUG] Saved partition " << i << " (unfilled): "
+                              << debug_file << "\n";
+                }
+            }
+        }
+    }
+
     // Phase 4: Fill holes in parallel
     if (verbose) {
         std::cout << "\n[Partitioned] Phase 4: Filling holes in parallel ("
@@ -131,6 +162,24 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose) {
         }
     }
 
+    // Debug: Save filled partitions (after filling)
+    if (debug) {
+        for (size_t i = 0; i < filled_submeshes.size(); ++i) {
+            std::ostringstream oss;
+            oss << "debug_07_partition_" << std::setw(3) << std::setfill('0') << i
+                << "_filled.ply";
+            std::string debug_file = oss.str();
+
+            if (CGAL::IO::write_PLY(debug_file, filled_submeshes[i].mesh,
+                                   CGAL::parameters::use_binary_mode(true))) {
+                if (verbose) {
+                    std::cout << "  [DEBUG] Saved partition " << i << " (filled): "
+                              << debug_file << "\n";
+                }
+            }
+        }
+    }
+
     // Aggregate statistics from submeshes
     for (const auto& submesh : filled_submeshes) {
         // Count holes that were successfully filled
@@ -145,6 +194,16 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose) {
     }
 
     mesh_ = MeshMerger::merge_submeshes(mesh_, filled_submeshes, verbose);
+
+    // Debug: Save final merged mesh
+    if (debug) {
+        std::string debug_file = "debug_08_final_merged.ply";
+        if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
+            if (verbose) {
+                std::cout << "  [DEBUG] Saved final merged mesh: " << debug_file << "\n";
+            }
+        }
+    }
 
     auto end_time = std::chrono::high_resolution_clock::now();
     stats.total_time_ms = std::chrono::duration<double, std::milli>(

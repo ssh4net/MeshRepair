@@ -60,7 +60,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_duplicates.ply";
+            std::string debug_file = "debug_01_after_duplicates.ply";
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -135,7 +135,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_nonmanifold.ply";
+            std::string debug_file = "debug_02_after_nonmanifold.ply";
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -163,7 +163,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_isolated.ply";
+            std::string debug_file = "debug_03_after_isolated.ply";
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -191,7 +191,7 @@ PreprocessingStats MeshPreprocessor::preprocess() {
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_largest_component.ply";
+            std::string debug_file = "debug_04_after_components.ply";
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";

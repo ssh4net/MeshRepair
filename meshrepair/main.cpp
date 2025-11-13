@@ -252,7 +252,7 @@ int main(int argc, char** argv) {
     if (args.enable_preprocessing) {
         // Debug: Save original loaded mesh before any preprocessing
         if (args.debug) {
-            std::string debug_file = "debug_original_loaded.ply";
+            std::string debug_file = "debug_00_original_loaded.ply";
             if (CGAL::IO::write_PLY(debug_file, mesh, CGAL::parameters::use_binary_mode(true))) {
                 if (!args.quiet) {
                     std::cout << "  [DEBUG] Saved original loaded mesh: " << debug_file << "\n";
@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
         ParallelHoleFillerPipeline partitioned_processor(
             mesh, thread_manager, args.filling_options);
 
-        stats = partitioned_processor.process_partitioned(args.filling_options.verbose);
+        stats = partitioned_processor.process_partitioned(args.filling_options.verbose, args.debug);
     }
     else {
         // Use legacy pipeline processing
