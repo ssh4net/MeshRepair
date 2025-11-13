@@ -40,17 +40,13 @@ public:
     /// @return Hole with neighborhood information
     HoleWithNeighborhood compute_neighborhood(const HoleInfo& hole) const;
 
-    /// Partition holes into independent groups using greedy algorithm
+    /// Partition holes by simple count-based division (equal holes per partition)
     /// @param holes All holes to partition
+    /// @param num_partitions Number of partitions to create
     /// @return Vector of partitions, each partition is a vector of hole indices
-    std::vector<std::vector<size_t>> partition_holes_greedy(
-        const std::vector<HoleInfo>& holes) const;
-
-    /// Partition holes with neighborhood information (more efficient if already computed)
-    /// @param neighborhoods Pre-computed neighborhoods
-    /// @return Vector of partitions, each partition is a vector of hole indices
-    std::vector<std::vector<size_t>> partition_neighborhoods_greedy(
-        const std::vector<HoleWithNeighborhood>& neighborhoods) const;
+    std::vector<std::vector<size_t>> partition_holes_by_count(
+        const std::vector<HoleInfo>& holes,
+        size_t num_partitions) const;
 
     /// Get number of rings used for neighborhood computation
     unsigned int get_ring_count() const { return n_rings_; }
@@ -58,13 +54,6 @@ public:
 private:
     const Mesh& mesh_;
     unsigned int n_rings_;  // continuity + 1
-
-    /// Check if two hole neighborhoods have overlapping vertices
-    /// @param a First hole neighborhood
-    /// @param b Second hole neighborhood
-    /// @return true if neighborhoods share any vertices
-    bool has_overlap(const HoleWithNeighborhood& a,
-                    const HoleWithNeighborhood& b) const;
 
     /// Collect all faces adjacent to vertices in the neighborhood
     /// @param vertices Vertices in neighborhood

@@ -87,92 +87,38 @@ std::unordered_set<face_descriptor> MeshPartitioner::collect_adjacent_faces(
     return faces;
 }
 
-bool MeshPartitioner::has_overlap(
-    const HoleWithNeighborhood& a,
-    const HoleWithNeighborhood& b) const
+std::vector<std::vector<size_t>> MeshPartitioner::partition_holes_by_count(
+    const std::vector<HoleInfo>& holes,
+    size_t num_partitions) const
 {
-    // Quick rejection: bounding box test (cheap)
-    if (!CGAL::do_overlap(a.bbox, b.bbox)) {
-        return false;
-    }
-
-    // Precise test: check for shared vertices
-    // Iterate over smaller set for efficiency
-    const auto& smaller = a.n_ring_vertices.size() < b.n_ring_vertices.size() ?
-                          a.n_ring_vertices : b.n_ring_vertices;
-    const auto& larger = a.n_ring_vertices.size() < b.n_ring_vertices.size() ?
-                         b.n_ring_vertices : a.n_ring_vertices;
-
-    for (vertex_descriptor v : smaller) {
-        if (larger.find(v) != larger.end()) {
-            return true;  // Found shared vertex
-        }
-    }
-
-    return false;
-}
-
-std::vector<std::vector<size_t>> MeshPartitioner::partition_holes_greedy(
-    const std::vector<HoleInfo>& holes) const
-{
-    // First, compute neighborhoods for all holes
-    // Pre-allocate to enable indexed access (ready for parallel for_each)
-    std::vector<HoleWithNeighborhood> neighborhoods(holes.size());
-
-    // TODO: Can be parallelized with OpenMP: #pragma omp parallel for
-    for (size_t i = 0; i < holes.size(); ++i) {
-        neighborhoods[i] = compute_neighborhood(holes[i]);
-    }
-
-    // Then partition using the neighborhoods
-    return partition_neighborhoods_greedy(neighborhoods);
-}
-
-std::vector<std::vector<size_t>> MeshPartitioner::partition_neighborhoods_greedy(
-    const std::vector<HoleWithNeighborhood>& neighborhoods) const
-{
-    if (neighborhoods.empty()) {
+    if (holes.empty()) {
         return {};
     }
 
-    // Greedy partitioning: assign each hole to first available partition
-    std::vector<std::vector<size_t>> partitions;
-    std::vector<std::unordered_set<vertex_descriptor>> partition_vertices;
+    if (num_partitions == 0) {
+        num_partitions = 1;
+    }
 
-    for (size_t i = 0; i < neighborhoods.size(); ++i) {
-        bool assigned = false;
+    // Don't create more partitions than holes
+    if (num_partitions > holes.size()) {
+        num_partitions = holes.size();
+    }
 
-        // Try to add to existing partition
-        for (size_t p = 0; p < partitions.size(); ++p) {
-            // Check if this hole's vertices conflict with partition p's vertices
-            bool conflicts = false;
+    // Simple count-based partitioning: divide holes evenly across partitions
+    std::vector<std::vector<size_t>> partitions(num_partitions);
 
-            for (vertex_descriptor v : neighborhoods[i].n_ring_vertices) {
-                if (partition_vertices[p].find(v) != partition_vertices[p].end()) {
-                    conflicts = true;
-                    break;
-                }
-            }
+    size_t holes_per_partition = (holes.size() + num_partitions - 1) / num_partitions;
 
-            if (!conflicts) {
-                // Add hole to this partition
-                partitions[p].push_back(i);
+    // Distribute holes evenly
+    for (size_t i = 0; i < holes.size(); ++i) {
+        size_t partition_idx = i / holes_per_partition;
 
-                // Add all vertices from this hole's neighborhood to the partition
-                partition_vertices[p].insert(
-                    neighborhoods[i].n_ring_vertices.begin(),
-                    neighborhoods[i].n_ring_vertices.end());
-
-                assigned = true;
-                break;
-            }
+        // Safety check: ensure we don't exceed partition count
+        if (partition_idx >= num_partitions) {
+            partition_idx = num_partitions - 1;
         }
 
-        // Create new partition if couldn't fit in existing ones
-        if (!assigned) {
-            partitions.push_back({i});
-            partition_vertices.push_back(neighborhoods[i].n_ring_vertices);
-        }
+        partitions[partition_idx].push_back(i);
     }
 
     return partitions;

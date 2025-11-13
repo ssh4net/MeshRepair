@@ -54,14 +54,34 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
         std::cout << "[Partitioned] Found " << holes.size() << " hole(s)\n";
     }
 
-    // Phase 2: Partition holes (sequential)
+    // Phase 2: Partition holes by count (simple load balancing)
     if (verbose) {
-        std::cout << "\n[Partitioned] Phase 2: Computing neighborhoods and partitions...\n";
+        std::cout << "\n[Partitioned] Phase 2: Partitioning holes...\n";
     }
 
     MeshPartitioner partitioner(mesh_, filling_options_.fairing_continuity);
 
-    // Compute neighborhoods for all holes (can be parallelized)
+    // Use number of threads as partition count for optimal parallelism
+    size_t num_partitions = thread_manager_.get_filling_threads();
+
+    // Simple count-based partitioning (evenly distributed)
+    auto partitions = partitioner.partition_holes_by_count(holes, num_partitions);
+
+    if (verbose) {
+        std::cout << "[Partitioned] Created " << partitions.size()
+                  << " partition(s) for " << thread_manager_.get_filling_threads()
+                  << " thread(s):\n";
+        for (size_t i = 0; i < partitions.size(); ++i) {
+            std::cout << "  Partition " << i << ": "
+                      << partitions[i].size() << " hole(s)\n";
+        }
+    }
+
+    // Phase 3: Compute neighborhoods for holes (needed for submesh extraction)
+    if (verbose) {
+        std::cout << "\n[Partitioned] Phase 3: Computing neighborhoods...\n";
+    }
+
     std::vector<HoleWithNeighborhood> neighborhoods(holes.size());
 
     for (size_t i = 0; i < holes.size(); ++i) {
@@ -74,21 +94,9 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
                   << partitioner.get_ring_count() << "-ring radius\n";
     }
 
-    // Partition holes into independent groups
-    auto partitions = partitioner.partition_neighborhoods_greedy(neighborhoods);
-
+    // Phase 4: Extract submeshes (sequential, but fast)
     if (verbose) {
-        std::cout << "[Partitioned] Created " << partitions.size()
-                  << " partition(s):\n";
-        for (size_t i = 0; i < partitions.size(); ++i) {
-            std::cout << "  Partition " << i << ": "
-                      << partitions[i].size() << " hole(s)\n";
-        }
-    }
-
-    // Phase 3: Extract submeshes (sequential, but fast)
-    if (verbose) {
-        std::cout << "\n[Partitioned] Phase 3: Extracting submeshes...\n";
+        std::cout << "\n[Partitioned] Phase 4: Extracting submeshes...\n";
     }
 
     SubmeshExtractor extractor(mesh_);
@@ -127,9 +135,9 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
         }
     }
 
-    // Phase 4: Fill holes in parallel
+    // Phase 5: Fill holes in parallel
     if (verbose) {
-        std::cout << "\n[Partitioned] Phase 4: Filling holes in parallel ("
+        std::cout << "\n[Partitioned] Phase 5: Filling holes in parallel ("
                   << thread_manager_.get_filling_threads() << " thread(s))...\n";
     }
 
@@ -190,7 +198,7 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
 
     // Phase 5: Merge submeshes back into original mesh (sequential)
     if (verbose) {
-        std::cout << "\n[Partitioned] Phase 5: Merging filled submeshes back into original mesh...\n";
+        std::cout << "\n[Partitioned] Phase 6: Merging filled submeshes back into original mesh...\n";
     }
 
     mesh_ = MeshMerger::merge_submeshes(mesh_, filled_submeshes, verbose);
