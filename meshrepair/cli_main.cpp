@@ -66,6 +66,7 @@ print_usage(const char* program_name)
               << "  --preprocess           Enable all preprocessing steps\n"
               << "  --no-remove-duplicates Disable duplicate vertex removal\n"
               << "  --no-remove-non-manifold Disable non-manifold vertex removal\n"
+              << "  --no-remove-3facefan   Disable 3-face fan collapsing\n"
               << "  --no-remove-isolated   Disable isolated vertex removal\n"
               << "  --no-remove-small      Disable small component removal\n"
               << "  --non-manifold-passes <n> Number of non-manifold removal passes (default: 2)\n"
@@ -99,6 +100,7 @@ struct CommandLineArgs {
     bool enable_preprocessing              = false;
     bool preprocess_remove_duplicates      = true;
     bool preprocess_remove_non_manifold    = true;
+    bool preprocess_remove_3_face_fans     = true;
     bool preprocess_remove_isolated        = true;
     bool preprocess_keep_largest_component = true;
     size_t non_manifold_passes             = 10;
@@ -168,6 +170,8 @@ struct CommandLineArgs {
                 preprocess_remove_duplicates = false;
             } else if (arg == "--no-remove-non-manifold") {
                 preprocess_remove_non_manifold = false;
+            } else if (arg == "--no-remove-3facefan") {
+                preprocess_remove_3_face_fans = false;
             } else if (arg == "--no-remove-isolated") {
                 preprocess_remove_isolated = false;
             } else if (arg == "--no-remove-small") {
@@ -278,6 +282,7 @@ cli_main(int argc, char** argv)
         PreprocessingOptions prep_opts;
         prep_opts.remove_duplicates      = args.preprocess_remove_duplicates;
         prep_opts.remove_non_manifold    = args.preprocess_remove_non_manifold;
+        prep_opts.remove_3_face_fans     = args.preprocess_remove_3_face_fans;
         prep_opts.remove_isolated        = args.preprocess_remove_isolated;
         prep_opts.keep_largest_component = args.preprocess_keep_largest_component;
         prep_opts.non_manifold_passes    = args.non_manifold_passes;

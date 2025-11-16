@@ -155,21 +155,61 @@ endif()
 
 # Find nlohmann/json (header-only library for JSON parsing)
 # Required for engine IPC mode
+# First try to find via CMake config (if available)
 find_package(nlohmann_json QUIET)
-if(NOT nlohmann_json_FOUND)
-    message(STATUS "nlohmann/json not found via find_package, trying FetchContent")
 
-    # If not found, try to fetch it automatically
-    include(FetchContent)
-    FetchContent_Declare(
-        nlohmann_json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.3
-    )
-    FetchContent_MakeAvailable(nlohmann_json)
-    message(STATUS "nlohmann/json: fetched from GitHub")
+if(NOT nlohmann_json_FOUND)
+    # Try to find header directly in CMAKE_PREFIX_PATH/include
+    set(_nlohmann_json_found FALSE)
+
+    if(CMAKE_PREFIX_PATH)
+        foreach(_prefix ${CMAKE_PREFIX_PATH})
+            if(EXISTS "${_prefix}/include/nlohmann/json.hpp")
+                set(NLOHMANN_JSON_INCLUDE_DIR "${_prefix}/include" CACHE PATH "Path to nlohmann/json include directory")
+                message(STATUS "nlohmann/json found: ${NLOHMANN_JSON_INCLUDE_DIR}")
+                add_library(nlohmann_json INTERFACE IMPORTED)
+                target_include_directories(nlohmann_json INTERFACE "${NLOHMANN_JSON_INCLUDE_DIR}")
+                add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
+                set(_nlohmann_json_found TRUE)
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    # If still not found, try standard system paths
+    if(NOT _nlohmann_json_found)
+        set(_nlohmann_search_paths
+            "/usr/include"
+            "/usr/local/include"
+        )
+
+        foreach(_path ${_nlohmann_search_paths})
+            if(EXISTS "${_path}/nlohmann/json.hpp")
+                set(NLOHMANN_JSON_INCLUDE_DIR "${_path}" CACHE PATH "Path to nlohmann/json include directory")
+                message(STATUS "nlohmann/json found in system path: ${NLOHMANN_JSON_INCLUDE_DIR}")
+                add_library(nlohmann_json INTERFACE IMPORTED)
+                target_include_directories(nlohmann_json INTERFACE "${NLOHMANN_JSON_INCLUDE_DIR}")
+                add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
+                set(_nlohmann_json_found TRUE)
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    # If still not found, fetch from GitHub
+    if(NOT _nlohmann_json_found)
+        message(STATUS "nlohmann/json not found locally, fetching from GitHub...")
+        include(FetchContent)
+        FetchContent_Declare(
+            nlohmann_json
+            GIT_REPOSITORY https://github.com/nlohmann/json.git
+            GIT_TAG v3.11.3
+        )
+        FetchContent_MakeAvailable(nlohmann_json)
+        message(STATUS "nlohmann/json: fetched from GitHub")
+    endif()
 else()
-    message(STATUS "nlohmann/json found via package")
+    message(STATUS "nlohmann/json found via CMake package")
 endif()
 
 # Source files
@@ -211,6 +251,7 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/mesh_validator.h
     meshrepair/include/progress_reporter.h
     meshrepair/include/mesh_preprocessor.h
+    meshrepair/include/polygon_soup_repair.h
     meshrepair/include/thread_manager.h
     meshrepair/include/threadpool.h
     meshrepair/include/pipeline_processor.h

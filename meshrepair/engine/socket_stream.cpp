@@ -148,14 +148,14 @@ namespace Engine {
         addr.sin_port = htons(static_cast<unsigned short>(port));
 
         if (::bind(server_socket_, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-            closesocket(server_socket_);
+            ::closesocket(server_socket_);
             server_socket_ = INVALID_SOCKET;
             return false;
         }
 
         // Start listening
         if (::listen(server_socket_, 1) == SOCKET_ERROR) {
-            closesocket(server_socket_);
+            ::closesocket(server_socket_);
             server_socket_ = INVALID_SOCKET;
             return false;
         }
@@ -180,7 +180,7 @@ namespace Engine {
     void SocketServer::close()
     {
         if (server_socket_ != INVALID_SOCKET) {
-            closesocket(server_socket_);
+            ::closesocket(server_socket_);
             server_socket_ = INVALID_SOCKET;
         }
     }

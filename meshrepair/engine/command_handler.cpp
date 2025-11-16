@@ -523,6 +523,7 @@ namespace Engine {
         // Parse all preprocessing options from params
         options.remove_duplicates      = params.value("remove_duplicates", true);
         options.remove_non_manifold    = params.value("remove_non_manifold", true);
+        options.remove_3_face_fans     = params.value("remove_3_face_fans", true);
         options.remove_isolated        = params.value("remove_isolated", true);
         options.keep_largest_component = params.value("keep_largest_component", true);
         options.non_manifold_passes    = params.value("non_manifold_passes", 10u);

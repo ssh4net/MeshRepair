@@ -251,6 +251,169 @@ public:
         return result.total_polygons_removed;
     }
 
+    /// Detect and remove 3-face fans around central vertices
+    ///
+    /// A 3-face fan is:
+    /// - 3 triangular faces sharing a common central vertex
+    /// - The fan has exactly 3 boundary edges (forming a triangle outline)
+    /// - Can be replaced with a single triangle, removing the central vertex
+    ///
+    /// This simplification reduces polygon count and removes unnecessary vertices
+    ///
+    /// @param points Point array (vertices may be removed)
+    /// @param polygons Polygon soup (3 triangles replaced with 1)
+    /// @return Number of 3-face fans collapsed
+    template<typename PointRange, typename PolygonRange>
+    static size_t remove_3_face_fans(PointRange& points, PolygonRange& polygons)
+    {
+        if (polygons.empty()) return 0;
+
+        using VertexID = size_t;
+        using PolygonID = size_t;
+
+        // Build vertex-to-polygons map using flat buffer approach
+        size_t max_vertex = 0;
+        for (const auto& polygon : polygons) {
+            for (VertexID v : polygon) {
+                if (v > max_vertex) max_vertex = v;
+            }
+        }
+
+        std::vector<size_t> vertex_count(max_vertex + 1, 0);
+        std::vector<size_t> vertex_offsets(max_vertex + 2);
+
+        // Count polygons per vertex
+        for (const auto& polygon : polygons) {
+            if (polygon.size() != 3) continue;  // Only process triangles
+            for (VertexID v : polygon) {
+                vertex_count[v]++;
+            }
+        }
+
+        // Compute offsets
+        vertex_offsets[0] = 0;
+        for (size_t v = 0; v <= max_vertex; ++v) {
+            vertex_offsets[v + 1] = vertex_offsets[v] + vertex_count[v];
+        }
+
+        std::vector<PolygonID> vertex_poly_data(vertex_offsets[max_vertex + 1]);
+        std::fill(vertex_count.begin(), vertex_count.end(), 0);
+
+        // Fill polygon data
+        for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
+            const auto& polygon = polygons[poly_id];
+            if (polygon.size() != 3) continue;
+
+            for (VertexID v : polygon) {
+                size_t idx = vertex_offsets[v] + vertex_count[v]++;
+                vertex_poly_data[idx] = poly_id;
+            }
+        }
+
+        // Find 3-face fans
+        std::vector<bool> polygon_to_remove(polygons.size(), false);
+        std::vector<bool> vertex_to_remove(max_vertex + 1, false);
+        std::vector<std::vector<size_t>> new_triangles;
+        size_t fans_found = 0;
+
+        for (size_t center_v = 0; center_v <= max_vertex; ++center_v) {
+            size_t start = vertex_offsets[center_v];
+            size_t end = vertex_offsets[center_v + 1];
+            size_t count = end - start;
+
+            // Must have exactly 3 incident triangular faces
+            if (count != 3) continue;
+
+            const PolygonID* incident_polys = &vertex_poly_data[start];
+
+            // Check if all 3 polygons are triangles
+            bool all_triangles = true;
+            for (size_t i = 0; i < 3; ++i) {
+                if (polygons[incident_polys[i]].size() != 3) {
+                    all_triangles = false;
+                    break;
+                }
+            }
+            if (!all_triangles) continue;
+
+            // Collect boundary vertices (vertices not equal to center_v)
+            std::vector<VertexID> boundary_verts;
+            boundary_verts.reserve(6);  // 3 triangles, each has 2 boundary verts
+
+            for (size_t i = 0; i < 3; ++i) {
+                const auto& tri = polygons[incident_polys[i]];
+                for (VertexID v : tri) {
+                    if (v != center_v) {
+                        boundary_verts.push_back(v);
+                    }
+                }
+            }
+
+            // Count unique boundary vertices
+            std::sort(boundary_verts.begin(), boundary_verts.end());
+            auto last = std::unique(boundary_verts.begin(), boundary_verts.end());
+            boundary_verts.erase(last, boundary_verts.end());
+
+            // Must have exactly 3 unique boundary vertices (forming outer triangle)
+            if (boundary_verts.size() != 3) continue;
+
+            // Verify this forms a valid fan by checking edge connectivity
+            // Each boundary vertex should appear in exactly 2 of the 3 triangles
+            bool valid_fan = true;
+            for (VertexID bv : boundary_verts) {
+                size_t appearances = 0;
+                for (size_t i = 0; i < 3; ++i) {
+                    const auto& tri = polygons[incident_polys[i]];
+                    if (std::find(tri.begin(), tri.end(), bv) != tri.end()) {
+                        appearances++;
+                    }
+                }
+                if (appearances != 2) {
+                    valid_fan = false;
+                    break;
+                }
+            }
+
+            if (!valid_fan) continue;
+
+            // Valid 3-face fan found!
+            // Mark the 3 triangles for removal
+            for (size_t i = 0; i < 3; ++i) {
+                polygon_to_remove[incident_polys[i]] = true;
+            }
+
+            // Mark center vertex for removal
+            vertex_to_remove[center_v] = true;
+
+            // Create replacement triangle from boundary vertices
+            std::vector<size_t> new_tri;
+            new_tri.reserve(3);
+            new_tri.push_back(boundary_verts[0]);
+            new_tri.push_back(boundary_verts[1]);
+            new_tri.push_back(boundary_verts[2]);
+            new_triangles.push_back(std::move(new_tri));
+
+            fans_found++;
+        }
+
+        if (fans_found == 0) return 0;
+
+        // Remove marked polygons
+        auto poly_end = std::remove_if(polygons.begin(), polygons.end(),
+            [&polygon_to_remove, idx = size_t(0)](const auto& poly) mutable {
+                return polygon_to_remove[idx++];
+            });
+        polygons.erase(poly_end, polygons.end());
+
+        // Add new triangles
+        polygons.insert(polygons.end(), new_triangles.begin(), new_triangles.end());
+
+        // Note: We don't actually remove vertices from points array to avoid re-indexing
+        // The removed vertices become isolated and will be cleaned up by remove_isolated_vertices
+
+        return fans_found;
+    }
+
 private:
     struct EdgeHash {
         size_t operator()(const std::pair<size_t, size_t>& edge) const {

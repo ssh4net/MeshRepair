@@ -111,6 +111,18 @@ MeshPreprocessor::preprocess()
         if (options_.debug && polygons_before > polygons.size()) {
             std::cout << "  [DEBUG] Removed " << (polygons_before - polygons.size()) << " duplicate polygons\n";
         }
+
+        // Debug: Save mesh after duplicate removal
+        if (options_.debug) {
+            std::string debug_file = "debug_03_after_duplicate_removal.ply";
+            Mesh debug_mesh;
+            PMP::polygon_soup_to_polygon_mesh(points, polygons, debug_mesh);
+            if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL
+                ::parameters::use_binary_mode(true))) {
+                std::cout << "  [DEBUG] Saved soup (after duplicate removal): " << debug_file << "\n";
+                std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
+                          << debug_mesh.number_of_faces() << " faces\n";
+            }
     }
 
     // Step 1.4: Remove degenerate polygons (< 3 unique vertices)
@@ -135,7 +147,7 @@ MeshPreprocessor::preprocess()
     // Uses recursive local search - checks affected vertices only after first pass
     if (options_.remove_non_manifold) {
         if (options_.verbose) {
-            std::cout << "[4/6] Removing non-manifold vertices/edges (recursive local search)...\n";
+            std::cout << "[4/7] Removing non-manifold vertices/edges (recursive local search)...\n";
         }
 
         // Use recursive local search with max depth from options (default: 10)
@@ -153,9 +165,35 @@ MeshPreprocessor::preprocess()
         }
     }
 
-    // Step 1.6: Orient polygon soup (face normals)
+    // Step 1.6: Remove 3-face fans (simplification)
+    if (options_.remove_3_face_fans) {
+        if (options_.verbose) {
+            std::cout << "[5/7] Collapsing 3-face fans...\n";
+        }
+
+        size_t fans_collapsed = PolygonSoupRepair::remove_3_face_fans(points, polygons);
+        stats_.face_fans_collapsed = fans_collapsed;
+
+        if (options_.verbose) {
+            std::cout << "  Collapsed: " << fans_collapsed << " 3-face fan(s)\n\n";
+        }
+
+        // Debug: Save mesh after fan removal
+        if (options_.debug) {
+            std::string debug_file = "debug_04_after_3_face_fans.ply";
+            Mesh debug_mesh;
+            PMP::polygon_soup_to_polygon_mesh(points, polygons, debug_mesh);
+            if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
+                std::cout << "  [DEBUG] Saved soup (after 3-face fans): " << debug_file << "\n";
+                std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
+                          << debug_mesh.number_of_faces() << " faces\n";
+            }
+        }
+    }
+
+    // Step 1.7: Orient polygon soup (face normals)
     if (options_.verbose) {
-        std::cout << "[5/6] Orienting polygon soup...\n";
+        std::cout << "[6/7] Orienting polygon soup...\n";
     }
 
     // Debug: Save soup BEFORE orient
@@ -181,9 +219,9 @@ MeshPreprocessor::preprocess()
         }
     }
 
-    // Step 1.7: Convert soup to mesh (ONCE!)
+    // Step 1.8: Convert soup to mesh (ONCE!)
     if (options_.verbose) {
-        std::cout << "[6/6] Converting soup to mesh...\n";
+        std::cout << "[7/7] Converting soup to mesh...\n";
     }
 
     mesh_.clear();
@@ -196,7 +234,7 @@ MeshPreprocessor::preprocess()
 
     // Debug: Save mesh after soup conversion
     if (options_.debug) {
-        std::string debug_file = "debug_01_after_soup_cleanup.ply";
+        std::string debug_file = "debug_06_after_soup_cleanup.ply";
         if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
             if (options_.verbose) {
                 std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -227,7 +265,7 @@ MeshPreprocessor::preprocess()
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_03_after_isolated.ply";
+            std::string debug_file = "debug_07_after_isolated.ply";
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -252,7 +290,7 @@ MeshPreprocessor::preprocess()
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_04_after_components.ply";
+            std::string debug_file = "debug_08_after_components.ply";
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -374,6 +412,7 @@ MeshPreprocessor::print_report() const
     std::cout << "\n=== Preprocessing Report ===\n";
     std::cout << "Duplicate vertices merged: " << stats_.duplicates_merged << "\n";
     std::cout << "Non-manifold polygons removed: " << stats_.non_manifold_vertices_removed << "\n";
+    std::cout << "3-face fans collapsed: " << stats_.face_fans_collapsed << "\n";
     std::cout << "Isolated vertices removed: " << stats_.isolated_vertices_removed << "\n";
     std::cout << "Connected components found: " << stats_.connected_components_found << "\n";
     std::cout << "Small components removed: " << stats_.small_components_removed << "\n";

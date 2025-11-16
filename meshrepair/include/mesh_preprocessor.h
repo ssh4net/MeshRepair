@@ -12,6 +12,7 @@ class ThreadPool;
 struct PreprocessingStats {
     size_t duplicates_merged             = 0;
     size_t non_manifold_vertices_removed = 0;  // Non-manifold polygons removed in soup space
+    size_t face_fans_collapsed           = 0;  // 3-face fans collapsed
     size_t isolated_vertices_removed     = 0;
     size_t connected_components_found    = 0;  // Number of connected components found
     size_t small_components_removed      = 0;  // Number of small components removed
@@ -19,14 +20,15 @@ struct PreprocessingStats {
 
     bool has_changes() const
     {
-        return duplicates_merged > 0 || non_manifold_vertices_removed > 0 || isolated_vertices_removed > 0
-               || small_components_removed > 0;
+        return duplicates_merged > 0 || non_manifold_vertices_removed > 0 || face_fans_collapsed > 0
+               || isolated_vertices_removed > 0 || small_components_removed > 0;
     }
 };
 
 struct PreprocessingOptions {
     bool remove_duplicates      = true;
     bool remove_non_manifold    = true;
+    bool remove_3_face_fans     = true;  // Remove 3-triangle fans around single vertex
     bool remove_isolated        = true;
     bool keep_largest_component = true;  // Keep only largest connected component
     size_t non_manifold_passes  = 10;    // Max recursion depth for local search (not global passes!)
