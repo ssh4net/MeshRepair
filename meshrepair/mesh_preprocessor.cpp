@@ -56,24 +56,32 @@ MeshPreprocessor::preprocess()
         std::cout << "[1/6] Extracting polygon soup...\n";
     }
 
+    // OPTIMIZATION: Pre-allocate vectors with exact sizes to avoid reallocations
+    size_t num_vertices = mesh_.number_of_vertices();
+    size_t num_faces = mesh_.number_of_faces();
+
     std::vector<Point_3> points;
     std::vector<std::vector<std::size_t>> polygons;
 
-    // Extract vertices
+    points.reserve(num_vertices);
+    polygons.reserve(num_faces);
+
+    // Extract vertices - build index map and populate points
     std::map<vertex_descriptor, std::size_t> vertex_index_map;
-    std::size_t index = 0;
+    std::size_t v_idx = 0;
     for (auto v : mesh_.vertices()) {
-        vertex_index_map[v] = index++;
+        vertex_index_map[v] = v_idx++;
         points.push_back(mesh_.point(v));
     }
 
-    // Extract faces
+    // Extract faces - pre-reserve typical polygon size to avoid reallocations
     for (auto f : mesh_.faces()) {
         std::vector<std::size_t> polygon;
+        polygon.reserve(4);  // Reserve for typical triangle/quad (avoids reallocation)
         for (auto v : CGAL::vertices_around_face(CGAL::halfedge(f, mesh_), mesh_)) {
             polygon.push_back(vertex_index_map[v]);
         }
-        polygons.push_back(polygon);
+        polygons.push_back(std::move(polygon));  // Move to avoid copy
     }
 
     if (options_.debug) {

@@ -27,8 +27,7 @@ public:
     /// 3. Collect "affected vertices" (vertices in removed polygons + neighbors)
     /// 4. Recursively check only affected vertices until no more issues found
     ///
-    /// This is much faster than N global passes because we only check
-    /// the local neighborhood where topology changed.
+    /// PERFORMANCE OPTIMIZED: Uses flat buffers and two-pass algorithm to minimize allocations
     ///
     /// @param polygons Polygon soup (each polygon is a vector of vertex indices)
     /// @param max_depth Maximum recursion depth (default: 10)
@@ -48,110 +47,158 @@ public:
 
         using PolygonID = size_t;
         using VertexID = size_t;
+        using Edge = std::pair<size_t, size_t>;
 
-        std::unordered_set<VertexID> vertices_to_check;  // Empty = check all
+        // OPTIMIZATION: Reusable buffers allocated ONCE outside loop
+        std::unordered_set<PolygonID> polygons_to_remove;
+        std::unordered_set<VertexID> vertices_to_check;
+        std::unordered_set<VertexID> vertices_to_check_next;
 
-        // Iterative passes - first pass checks all, subsequent passes check only affected
+        // Flat buffer approach to avoid hash map overhead
+        std::vector<size_t> vertex_count;          // Count of polygons per vertex
+        std::vector<size_t> vertex_offsets;        // Start offset for each vertex
+        std::vector<PolygonID> vertex_poly_data;   // Flat array of polygon IDs
+
+        std::unordered_map<Edge, std::vector<PolygonID>, EdgeHash> edge_to_polygons;
+        edge_to_polygons.reserve(polygons.size() * 3);
+
+        // Iterative passes
         for (size_t pass = 0; pass < max_depth; ++pass) {
-            // PHASE 1: Build vertex-to-polygons map
-            std::unordered_map<VertexID, std::vector<PolygonID>> vertex_to_polygons;
+            // PHASE 1: Build vertex-to-polygons map using TWO-PASS flat buffer approach
 
+            // Find max vertex ID to size arrays
+            size_t max_vertex = 0;
+            for (const auto& polygon : polygons) {
+                for (VertexID v : polygon) {
+                    if (v > max_vertex) max_vertex = v;
+                }
+            }
+
+            // Resize arrays
+            vertex_count.assign(max_vertex + 1, 0);
+
+            // Pass 1: Count polygons per vertex
             for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
                 const auto& polygon = polygons[poly_id];
-
-                if (polygon.size() < 3) {
-                    continue; // Invalid polygon
-                }
+                if (polygon.size() < 3) continue;
 
                 for (VertexID v : polygon) {
-                    vertex_to_polygons[v].push_back(poly_id);
+                    vertex_count[v]++;
+                }
+            }
+
+            // Compute offsets (prefix sum)
+            vertex_offsets.resize(max_vertex + 2);  // +1 for sentinel
+            vertex_offsets[0] = 0;
+            for (size_t v = 0; v <= max_vertex; ++v) {
+                vertex_offsets[v + 1] = vertex_offsets[v] + vertex_count[v];
+            }
+
+            // Allocate flat data array
+            vertex_poly_data.resize(vertex_offsets[max_vertex + 1]);
+
+            // Reset counts (will reuse as write indices)
+            vertex_count.assign(max_vertex + 1, 0);
+
+            // Pass 2: Fill polygon data
+            for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
+                const auto& polygon = polygons[poly_id];
+                if (polygon.size() < 3) continue;
+
+                for (VertexID v : polygon) {
+                    size_t idx = vertex_offsets[v] + vertex_count[v]++;
+                    vertex_poly_data[idx] = poly_id;
+                }
+            }
+
+            // Build edge-to-polygons map (clear and reuse)
+            edge_to_polygons.clear();
+            for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
+                const auto& polygon = polygons[poly_id];
+                size_t num_verts = polygon.size();
+                if (num_verts < 3) continue;
+
+                for (size_t i = 0; i < num_verts; ++i) {
+                    size_t v0 = polygon[i];
+                    size_t v1 = polygon[(i + 1) % num_verts];
+                    Edge edge = (v0 < v1) ? Edge{v0, v1} : Edge{v1, v0};
+
+                    auto& vec = edge_to_polygons[edge];
+                    if (vec.empty()) {
+                        vec.reserve(2);  // Most edges have 1-2 incident polygons
+                    }
+                    vec.push_back(poly_id);
                 }
             }
 
             // PHASE 2: Detect non-manifold vertices
-            // If first pass (vertices_to_check is empty), check all vertices
-            // Otherwise, only check affected vertices
-            std::unordered_set<PolygonID> polygons_to_remove;
+            polygons_to_remove.clear();
 
             if (vertices_to_check.empty()) {
                 // First pass - check ALL vertices
-                for (const auto& [vertex, incident_polys] : vertex_to_polygons) {
-                    if (incident_polys.size() < 2) {
-                        continue; // Boundary or isolated vertex
-                    }
+                for (size_t vertex = 0; vertex <= max_vertex; ++vertex) {
+                    size_t start = vertex_offsets[vertex];
+                    size_t end = vertex_offsets[vertex + 1];
+                    size_t count = end - start;
 
-                    if (!is_single_umbrella(vertex, incident_polys, polygons)) {
+                    if (count < 2) continue;
+
+                    // Create view of incident polygons
+                    const PolygonID* incident_polys = &vertex_poly_data[start];
+
+                    if (!is_single_umbrella_array(vertex, incident_polys, count, polygons)) {
                         // Non-manifold vertex! Remove all incident polygons
-                        polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
+                        for (size_t i = 0; i < count; ++i) {
+                            polygons_to_remove.insert(incident_polys[i]);
+                        }
                     }
                 }
             } else {
                 // Subsequent passes - check only affected vertices
                 for (VertexID vertex : vertices_to_check) {
-                    auto it = vertex_to_polygons.find(vertex);
-                    if (it == vertex_to_polygons.end()) {
-                        continue; // Vertex no longer exists
-                    }
+                    if (vertex > max_vertex) continue;
 
-                    const auto& incident_polys = it->second;
-                    if (incident_polys.size() < 2) {
-                        continue; // Boundary or isolated vertex
-                    }
+                    size_t start = vertex_offsets[vertex];
+                    size_t end = vertex_offsets[vertex + 1];
+                    size_t count = end - start;
 
-                    if (!is_single_umbrella(vertex, incident_polys, polygons)) {
-                        // Non-manifold vertex! Remove all incident polygons
-                        polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
+                    if (count < 2) continue;
+
+                    const PolygonID* incident_polys = &vertex_poly_data[start];
+
+                    if (!is_single_umbrella_array(vertex, incident_polys, count, polygons)) {
+                        for (size_t i = 0; i < count; ++i) {
+                            polygons_to_remove.insert(incident_polys[i]);
+                        }
                     }
                 }
             }
 
-            // PHASE 3: Check for non-manifold edges (edges with > 2 polygons)
-            using Edge = std::pair<size_t, size_t>;
-            std::unordered_map<Edge, std::vector<PolygonID>, EdgeHash> edge_to_polygons;
-
-            for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
-                const auto& polygon = polygons[poly_id];
-                size_t num_verts = polygon.size();
-
-                if (num_verts < 3) {
-                    continue;
-                }
-
-                for (size_t i = 0; i < num_verts; ++i) {
-                    size_t v0 = polygon[i];
-                    size_t v1 = polygon[(i + 1) % num_verts];
-
-                    Edge edge = (v0 < v1) ? Edge{v0, v1} : Edge{v1, v0};
-                    edge_to_polygons[edge].push_back(poly_id);
-                }
-            }
-
+            // PHASE 3: Check for non-manifold edges
             for (const auto& [edge, incident_polys] : edge_to_polygons) {
                 if (incident_polys.size() > 2) {
-                    // Non-manifold edge!
                     polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
                 }
             }
 
-            // No more non-manifold issues found - we're done!
+            // No more issues found
             if (polygons_to_remove.empty()) {
                 result.iterations_executed = pass + 1;
                 break;
             }
 
-            // PHASE 4: Collect affected vertices for next pass
-            // These are: vertices in removed polygons + their neighbors
-            vertices_to_check.clear();
+            // PHASE 4: Collect affected vertices
+            vertices_to_check_next.clear();
 
             for (PolygonID poly_id : polygons_to_remove) {
-                const auto& polygon = polygons[poly_id];
+                if (poly_id >= polygons.size()) continue;
 
-                // Add all vertices from this polygon
+                const auto& polygon = polygons[poly_id];
                 for (VertexID v : polygon) {
-                    vertices_to_check.insert(v);
+                    vertices_to_check_next.insert(v);
                 }
 
-                // Add vertices from neighboring polygons (polygons sharing edges)
+                // Add neighbor vertices
                 for (size_t i = 0; i < polygon.size(); ++i) {
                     size_t v0 = polygon[i];
                     size_t v1 = polygon[(i + 1) % polygon.size()];
@@ -159,11 +206,10 @@ public:
 
                     auto it = edge_to_polygons.find(edge);
                     if (it != edge_to_polygons.end()) {
-                        for (PolygonID neighbor_poly_id : it->second) {
-                            if (neighbor_poly_id != poly_id && neighbor_poly_id < polygons.size()) {
-                                const auto& neighbor_polygon = polygons[neighbor_poly_id];
-                                for (VertexID neighbor_v : neighbor_polygon) {
-                                    vertices_to_check.insert(neighbor_v);
+                        for (PolygonID neighbor_id : it->second) {
+                            if (neighbor_id != poly_id && neighbor_id < polygons.size()) {
+                                for (VertexID neighbor_v : polygons[neighbor_id]) {
+                                    vertices_to_check_next.insert(neighbor_v);
                                 }
                             }
                         }
@@ -174,15 +220,16 @@ public:
             // PHASE 5: Remove marked polygons
             auto new_end = std::remove_if(polygons.begin(), polygons.end(),
                 [&polygons_to_remove, poly_id = size_t(0)](const auto& polygon) mutable {
-                    (void)polygon;  // Unused - we only need the index via poly_id
+                    (void)polygon;
                     return polygons_to_remove.find(poly_id++) != polygons_to_remove.end();
                 });
 
-            size_t removed_this_pass = std::distance(new_end, polygons.end());
+            size_t removed = std::distance(new_end, polygons.end());
             polygons.erase(new_end, polygons.end());
-            result.total_polygons_removed += removed_this_pass;
+            result.total_polygons_removed += removed;
 
-            // If we hit max depth, warn and stop
+            vertices_to_check.swap(vertices_to_check_next);
+
             if (pass == max_depth - 1) {
                 result.iterations_executed = max_depth;
                 result.hit_max_iterations = true;
@@ -193,7 +240,7 @@ public:
         return result;
     }
 
-    /// Legacy interface - returns only polygon count (for backward compatibility)
+    /// Legacy interface
     template<typename PolygonRange>
     static size_t remove_non_manifold_polygons(
         PolygonRange& polygons,
@@ -205,62 +252,82 @@ public:
     }
 
 private:
-    /// Hash function for Edge (pair of size_t)
     struct EdgeHash {
         size_t operator()(const std::pair<size_t, size_t>& edge) const {
-            // Cantor pairing function for perfect hash
             size_t a = edge.first;
             size_t b = edge.second;
             return (a + b) * (a + b + 1) / 2 + b;
         }
     };
 
-    /// Check if polygons incident to a vertex form a single umbrella (fan)
-    ///
-    /// A single umbrella means:
-    /// - The polygons can be ordered such that consecutive polygons share an edge
-    /// - The ordering forms a single connected chain (possibly closed for interior vertices)
-    ///
-    /// @param vertex The vertex to check
-    /// @param incident_polys Polygons incident to the vertex
-    /// @param polygons All polygons in the soup
-    /// @return true if forms a single umbrella, false if non-manifold
+    /// Optimized version that takes array pointer instead of vector
     template<typename PolygonRange>
-    static bool is_single_umbrella(
+    static bool is_single_umbrella_array(
         size_t vertex,
-        const std::vector<size_t>& incident_polys,
+        const size_t* incident_polys,
+        size_t num_polys,
         const PolygonRange& polygons)
     {
-        if (incident_polys.size() < 2) {
-            return true; // Not enough polygons to be non-manifold
+        if (num_polys < 2) return true;
+
+        constexpr size_t STACK_CAPACITY = 16;
+        constexpr size_t MAX_NEIGHBORS = 8;
+
+        // Stack allocation for common case
+        uint8_t visited_stack[STACK_CAPACITY];
+        size_t stack_stack[STACK_CAPACITY];
+        size_t adjacency_data_stack[STACK_CAPACITY * MAX_NEIGHBORS];
+        size_t adjacency_count_stack[STACK_CAPACITY];
+
+        uint8_t* visited;
+        size_t* dfs_stack;
+        size_t* adjacency_data;
+        size_t* adjacency_count;
+        size_t dfs_stack_size = 0;
+
+        std::vector<uint8_t> visited_heap;
+        std::vector<size_t> stack_heap;
+        std::vector<size_t> adjacency_data_heap;
+        std::vector<size_t> adjacency_count_heap;
+
+        if (num_polys <= STACK_CAPACITY) {
+            visited = visited_stack;
+            dfs_stack = stack_stack;
+            adjacency_data = adjacency_data_stack;
+            adjacency_count = adjacency_count_stack;
+            std::fill_n(visited, num_polys, 0);
+            std::fill_n(adjacency_count, num_polys, 0);
+        } else {
+            visited_heap.resize(num_polys, 0);
+            stack_heap.reserve(num_polys);
+            adjacency_data_heap.resize(num_polys * MAX_NEIGHBORS);
+            adjacency_count_heap.resize(num_polys, 0);
+            visited = visited_heap.data();
+            dfs_stack = stack_heap.data();
+            adjacency_data = adjacency_data_heap.data();
+            adjacency_count = adjacency_count_heap.data();
         }
 
-        // Build adjacency graph of incident polygons
-        // Two polygons are adjacent if they share an edge containing the vertex
-        using Edge = std::pair<size_t, size_t>;
-        std::unordered_map<size_t, std::vector<size_t>> poly_adjacency;
-
-        for (size_t poly_id : incident_polys) {
-            const auto& polygon = polygons[poly_id];
-
-            // Find edges containing the vertex
+        // Build adjacency
+        for (size_t i = 0; i < num_polys; ++i) {
+            const auto& polygon = polygons[incident_polys[i]];
             size_t num_verts = polygon.size();
-            for (size_t i = 0; i < num_verts; ++i) {
-                if (polygon[i] == vertex) {
-                    // Get the two adjacent vertices
-                    size_t prev_v = polygon[(i + num_verts - 1) % num_verts];
-                    size_t next_v = polygon[(i + 1) % num_verts];
 
-                    // Check if any other incident polygon shares these edges
-                    for (size_t other_poly_id : incident_polys) {
-                        if (other_poly_id == poly_id) continue;
+            for (size_t j = 0; j < num_verts; ++j) {
+                if (polygon[j] == vertex) {
+                    size_t prev_v = polygon[(j + num_verts - 1) % num_verts];
+                    size_t next_v = polygon[(j + 1) % num_verts];
 
-                        const auto& other_polygon = polygons[other_poly_id];
+                    for (size_t k = 0; k < num_polys; ++k) {
+                        if (k == i) continue;
 
-                        // Check if other polygon contains edge (vertex, prev_v) or (vertex, next_v)
-                        if (contains_edge(other_polygon, vertex, prev_v) ||
-                            contains_edge(other_polygon, vertex, next_v)) {
-                            poly_adjacency[poly_id].push_back(other_poly_id);
+                        const auto& other = polygons[incident_polys[k]];
+                        if (contains_edge(other, vertex, prev_v) ||
+                            contains_edge(other, vertex, next_v)) {
+
+                            if (adjacency_count[i] < MAX_NEIGHBORS) {
+                                adjacency_data[i * MAX_NEIGHBORS + adjacency_count[i]++] = k;
+                            }
                         }
                     }
                     break;
@@ -268,38 +335,33 @@ private:
             }
         }
 
-        // Check if adjacency graph is connected
-        // Use DFS to find all reachable polygons from the first one
-        std::unordered_set<size_t> visited;
-        std::vector<size_t> stack;
+        // DFS
+        dfs_stack[dfs_stack_size++] = 0;
+        visited[0] = true;
+        size_t visited_count = 1;
 
-        stack.push_back(incident_polys[0]);
-        visited.insert(incident_polys[0]);
+        while (dfs_stack_size > 0) {
+            size_t idx = dfs_stack[--dfs_stack_size];
 
-        while (!stack.empty()) {
-            size_t current = stack.back();
-            stack.pop_back();
-
-            for (size_t neighbor : poly_adjacency[current]) {
-                if (visited.find(neighbor) == visited.end()) {
-                    visited.insert(neighbor);
-                    stack.push_back(neighbor);
+            for (size_t i = 0; i < adjacency_count[idx]; ++i) {
+                size_t neighbor = adjacency_data[idx * MAX_NEIGHBORS + i];
+                if (!visited[neighbor]) {
+                    visited[neighbor] = true;
+                    visited_count++;
+                    dfs_stack[dfs_stack_size++] = neighbor;
                 }
             }
         }
 
-        // If we visited all incident polygons, it's a single umbrella
-        return visited.size() == incident_polys.size();
+        return visited_count == num_polys;
     }
 
-    /// Check if a polygon contains a directed edge (v0, v1) or (v1, v0)
     template<typename Polygon>
-    static bool contains_edge(const Polygon& polygon, size_t v0, size_t v1) {
+    static inline bool contains_edge(const Polygon& polygon, size_t v0, size_t v1) {
         size_t num_verts = polygon.size();
         for (size_t i = 0; i < num_verts; ++i) {
             size_t curr = polygon[i];
             size_t next = polygon[(i + 1) % num_verts];
-
             if ((curr == v0 && next == v1) || (curr == v1 && next == v0)) {
                 return true;
             }
