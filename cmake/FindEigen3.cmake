@@ -17,10 +17,10 @@ endif()
 # Manual search
 set(EIGEN3_SEARCH_PATHS
     ${EIGEN3_INCLUDE_DIR}
-    /mnt/e/UBS/include/eigen3
     /usr/local/include/eigen3
     /usr/include/eigen3
     /opt/local/include/eigen3
+    /opt/homebrew/include/eigen3
     $ENV{EIGEN3_INCLUDE_DIR}
 )
 

@@ -17,10 +17,10 @@ namespace MeshRepair {
  * @return Vector of border halfedges
  */
 inline std::vector<halfedge_descriptor>
-find_border_halfedges_parallel(const Mesh& mesh, ThreadPool& pool, bool verbose = false) {
+find_border_halfedges_parallel(const Mesh& mesh, ThreadPool& pool, bool verbose = false)
+{
     if (verbose) {
-        std::cout << "  [Parallel] Finding border halfedges using "
-                  << pool.threadCount() << " thread(s)...\n";
+        std::cout << "  [Parallel] Finding border halfedges using " << pool.threadCount() << " thread(s)...\n";
     }
 
     // Partition halfedges
@@ -56,13 +56,12 @@ find_border_halfedges_parallel(const Mesh& mesh, ThreadPool& pool, bool verbose 
     }
 
     if (verbose) {
-        std::cout << "  [Parallel] Found " << all_borders.size()
-                  << " border halfedges\n";
+        std::cout << "  [Parallel] Found " << all_borders.size() << " border halfedges\n";
     }
 
     return all_borders;
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair
 
-#endif // MESHREPAIR_PARALLEL_DETECTION_H
+#endif  // MESHREPAIR_PARALLEL_DETECTION_H

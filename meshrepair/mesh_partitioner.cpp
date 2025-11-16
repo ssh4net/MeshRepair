@@ -8,9 +8,12 @@ namespace MeshRepair {
 MeshPartitioner::MeshPartitioner(const Mesh& mesh, unsigned int continuity)
     : mesh_(mesh)
     , n_rings_(continuity + 1)  // C0=1 ring, C1=2 rings, C2=3 rings
-{}
+{
+}
 
-HoleWithNeighborhood MeshPartitioner::compute_neighborhood(const HoleInfo& hole) const {
+HoleWithNeighborhood
+MeshPartitioner::compute_neighborhood(const HoleInfo& hole) const
+{
     HoleWithNeighborhood result(hole);
 
     // Step 1: Collect boundary vertices (ring 0)
@@ -20,7 +23,7 @@ HoleWithNeighborhood MeshPartitioner::compute_neighborhood(const HoleInfo& hole)
     std::vector<Point_3> all_points;
     all_points.reserve(hole.boundary_size * (n_rings_ + 1));  // Rough estimate
 
-    auto h = hole.boundary_halfedge;
+    auto h       = hole.boundary_halfedge;
     auto h_start = h;
     do {
         vertex_descriptor v = target(h, mesh_);
@@ -70,8 +73,8 @@ HoleWithNeighborhood MeshPartitioner::compute_neighborhood(const HoleInfo& hole)
     return result;
 }
 
-std::unordered_set<face_descriptor> MeshPartitioner::collect_adjacent_faces(
-    const std::unordered_set<vertex_descriptor>& vertices) const
+std::unordered_set<face_descriptor>
+MeshPartitioner::collect_adjacent_faces(const std::unordered_set<vertex_descriptor>& vertices) const
 {
     std::unordered_set<face_descriptor> faces;
 
@@ -87,9 +90,8 @@ std::unordered_set<face_descriptor> MeshPartitioner::collect_adjacent_faces(
     return faces;
 }
 
-std::vector<std::vector<size_t>> MeshPartitioner::partition_holes_by_count(
-    const std::vector<HoleInfo>& holes,
-    size_t num_partitions) const
+std::vector<std::vector<size_t>>
+MeshPartitioner::partition_holes_by_count(const std::vector<HoleInfo>& holes, size_t num_partitions) const
 {
     if (holes.empty()) {
         return {};
@@ -124,4 +126,4 @@ std::vector<std::vector<size_t>> MeshPartitioner::partition_holes_by_count(
     return partitions;
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

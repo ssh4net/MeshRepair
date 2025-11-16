@@ -10,7 +10,7 @@
 #include <chrono>
 
 #ifdef HAVE_RAPIDOBJ
-#include <rapidobj/rapidobj.hpp>
+#    include <rapidobj/rapidobj.hpp>
 #endif
 
 namespace fs = std::filesystem;
@@ -20,7 +20,9 @@ namespace MeshRepair {
 std::string MeshLoader::last_error_;
 
 #ifdef HAVE_RAPIDOBJ
-std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
+std::optional<Mesh>
+MeshLoader::load_obj_rapidobj(const std::string& filename)
+{
     auto start_time = std::chrono::high_resolution_clock::now();
 
     // ========== PHASE 1: Parse OBJ with RapidOBJ ==========
@@ -28,8 +30,8 @@ std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
     auto result = rapidobj::ParseFile(filename, rapidobj::MaterialLibrary::Ignore());
 
     if (result.error) {
-        last_error_ = "RapidOBJ parse error: " + result.error.code.message() +
-                      " at line " + std::to_string(result.error.line_num);
+        last_error_ = "RapidOBJ parse error: " + result.error.code.message() + " at line "
+                      + std::to_string(result.error.line_num);
         if (!result.error.line.empty()) {
             last_error_ += " [" + result.error.line + "]";
         }
@@ -48,7 +50,7 @@ std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
 
     // ========== PHASE 3: Count geometry ==========
     const auto& positions = result.attributes.positions;
-    size_t num_vertices = positions.size() / 3;
+    size_t num_vertices   = positions.size() / 3;
 
     size_t num_faces = 0;
     for (const auto& shape : result.shapes) {
@@ -77,11 +79,8 @@ std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
 
     for (size_t i = 0; i < num_vertices; ++i) {
         size_t idx = i * 3;
-        Point_3 p(
-            static_cast<double>(positions[idx + 0]),
-            static_cast<double>(positions[idx + 1]),
-            static_cast<double>(positions[idx + 2])
-        );
+        Point_3 p(static_cast<double>(positions[idx + 0]), static_cast<double>(positions[idx + 1]),
+                  static_cast<double>(positions[idx + 2]));
         vertex_map[i] = mesh.add_vertex(p);
     }
 
@@ -90,15 +89,15 @@ std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
     // ========== PHASE 6: Release RapidOBJ memory early ==========
     // Keep only shapes (indices), release positions array
     auto shapes = std::move(result.shapes);
-    result = {}; // Free positions, normals, texcoords
+    result      = {};  // Free positions, normals, texcoords
 
     // ========== PHASE 7: Add faces ==========
-    size_t faces_added = 0;
+    size_t faces_added  = 0;
     size_t faces_failed = 0;
 
     for (const auto& shape : shapes) {
         const auto& shape_mesh = shape.mesh;
-        size_t idx = 0;
+        size_t idx             = 0;
 
         for (size_t f = 0; f < shape_mesh.num_face_vertices.size(); ++f) {
             uint8_t num_verts = shape_mesh.num_face_vertices[f];
@@ -126,7 +125,7 @@ std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
     auto total_time = std::chrono::duration<double, std::milli>(faces_time - start_time).count();
 
     // ========== PHASE 8: Report ==========
-    std::cout << "Loaded mesh from: " << filename << " (RapidOBJ)\n"
+    std::cout << "Loaded mesh from: " << filename << "\n"
               << "  Vertices: " << mesh.number_of_vertices() << "\n"
               << "  Faces: " << mesh.number_of_faces() << " (added: " << faces_added;
 
@@ -138,9 +137,12 @@ std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
               << "  Edges: " << mesh.number_of_edges() << "\n"
               << "  Timing:\n"
               << "    Parse: " << std::chrono::duration<double, std::milli>(parse_time - start_time).count() << " ms\n"
-              << "    Triangulate: " << std::chrono::duration<double, std::milli>(triangulate_time - parse_time).count() << " ms\n"
-              << "    Add vertices: " << std::chrono::duration<double, std::milli>(vertices_time - triangulate_time).count() << " ms\n"
-              << "    Add faces: " << std::chrono::duration<double, std::milli>(faces_time - vertices_time).count() << " ms\n"
+              << "    Triangulate: " << std::chrono::duration<double, std::milli>(triangulate_time - parse_time).count()
+              << " ms\n"
+              << "    Add vertices: "
+              << std::chrono::duration<double, std::milli>(vertices_time - triangulate_time).count() << " ms\n"
+              << "    Add faces: " << std::chrono::duration<double, std::milli>(faces_time - vertices_time).count()
+              << " ms\n"
               << "    Total: " << total_time << " ms\n";
 
     if (faces_failed > 0) {
@@ -149,9 +151,11 @@ std::optional<Mesh> MeshLoader::load_obj_rapidobj(const std::string& filename) {
 
     return mesh;
 }
-#endif // HAVE_RAPIDOBJ
+#endif  // HAVE_RAPIDOBJ
 
-std::optional<Mesh> MeshLoader::load(const std::string& filename, Format format, bool force_cgal_loader) {
+std::optional<Mesh>
+MeshLoader::load(const std::string& filename, Format format, bool force_cgal_loader)
+{
     last_error_.clear();
 
     // Check file exists
@@ -206,7 +210,9 @@ std::optional<Mesh> MeshLoader::load(const std::string& filename, Format format,
     return mesh;
 }
 
-bool MeshLoader::save(const Mesh& mesh, const std::string& filename, Format format, bool binary_ply) {
+bool
+MeshLoader::save(const Mesh& mesh, const std::string& filename, Format format, bool binary_ply)
+{
     last_error_.clear();
 
     // Auto-detect format if needed
@@ -220,18 +226,14 @@ bool MeshLoader::save(const Mesh& mesh, const std::string& filename, Format form
     if (format == Format::PLY) {
         // PLY: binary by default for efficiency (faster I/O and smaller files)
         // Can be overridden with binary_ply parameter
-        success = CGAL::IO::write_PLY(filename, mesh,
-            CGAL::parameters::use_binary_mode(binary_ply));
-    }
-    else if (format == Format::OBJ) {
+        success = CGAL::IO::write_PLY(filename, mesh, CGAL::parameters::use_binary_mode(binary_ply));
+    } else if (format == Format::OBJ) {
         // OBJ: always ASCII (specification requirement)
         success = CGAL::IO::write_OBJ(filename, mesh);
-    }
-    else if (format == Format::OFF) {
+    } else if (format == Format::OFF) {
         // OFF: always ASCII
         success = CGAL::IO::write_OFF(filename, mesh);
-    }
-    else {
+    } else {
         // Generic writer (auto-detects from extension)
         success = CGAL::IO::write_polygon_mesh(filename, mesh);
     }
@@ -248,7 +250,9 @@ bool MeshLoader::save(const Mesh& mesh, const std::string& filename, Format form
     return true;
 }
 
-bool MeshLoader::validate_input_file(const std::string& filename) {
+bool
+MeshLoader::validate_input_file(const std::string& filename)
+{
     if (!fs::exists(filename)) {
         return false;
     }
@@ -262,16 +266,19 @@ bool MeshLoader::validate_input_file(const std::string& filename) {
     return file.good();
 }
 
-const std::string& MeshLoader::get_last_error() {
+const std::string&
+MeshLoader::get_last_error()
+{
     return last_error_;
 }
 
-MeshLoader::Format MeshLoader::detect_format(const std::string& filename) {
+MeshLoader::Format
+MeshLoader::detect_format(const std::string& filename)
+{
     auto ext = fs::path(filename).extension().string();
 
     // Convert to lowercase
-    std::transform(ext.begin(), ext.end(), ext.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
 
     if (ext == ".obj") {
         return Format::OBJ;
@@ -285,4 +292,4 @@ MeshLoader::Format MeshLoader::detect_format(const std::string& filename) {
     return Format::OBJ;
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

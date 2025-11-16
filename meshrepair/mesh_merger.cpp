@@ -10,10 +10,8 @@ namespace MeshRepair {
 
 namespace PMP = CGAL::Polygon_mesh_processing;
 
-Mesh MeshMerger::merge_submeshes(
-    const Mesh& original_mesh,
-    const std::vector<Submesh>& submeshes,
-    bool verbose)
+Mesh
+MeshMerger::merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh>& submeshes, bool verbose)
 {
     if (verbose) {
         std::cout << "[Merger] Merging " << submeshes.size() << " submesh(es) "
@@ -27,7 +25,7 @@ Mesh MeshMerger::merge_submeshes(
     // Add original mesh first
     soups.push_back(to_soup(original_mesh));
 
-    size_t total_points = soups.back().points.size();
+    size_t total_points   = soups.back().points.size();
     size_t total_polygons = soups.back().polygons.size();
 
     // Add all filled submeshes
@@ -38,14 +36,11 @@ Mesh MeshMerger::merge_submeshes(
     }
 
     if (verbose) {
-        std::cout << "[Merger] Converted to soups: "
-                  << total_points << " points, "
-                  << total_polygons << " polygons total\n";
-        std::cout << "[Merger]   Original mesh: "
-                  << soups[0].points.size() << " points, "
-                  << soups[0].polygons.size() << " polygons\n";
-        std::cout << "[Merger]   Filled submeshes: "
-                  << (total_points - soups[0].points.size()) << " points, "
+        std::cout << "[Merger] Converted to soups: " << total_points << " points, " << total_polygons
+                  << " polygons total\n";
+        std::cout << "[Merger]   Original mesh: " << soups[0].points.size() << " points, " << soups[0].polygons.size()
+                  << " polygons\n";
+        std::cout << "[Merger]   Filled submeshes: " << (total_points - soups[0].points.size()) << " points, "
                   << (total_polygons - soups[0].polygons.size()) << " polygons\n";
     }
 
@@ -58,9 +53,7 @@ Mesh MeshMerger::merge_submeshes(
         size_t point_offset = combined.points.size();
 
         // Add points (efficient bulk insert)
-        combined.points.insert(combined.points.end(),
-                              soup.points.begin(),
-                              soup.points.end());
+        combined.points.insert(combined.points.end(), soup.points.begin(), soup.points.end());
 
         // Add polygons with adjusted indices
         // Pre-allocate space for all polygons from this soup
@@ -82,17 +75,15 @@ Mesh MeshMerger::merge_submeshes(
     }
 
     if (verbose) {
-        std::cout << "[Merger] Combined soup: "
-                  << combined.points.size() << " points, "
-                  << combined.polygons.size() << " polygons\n";
+        std::cout << "[Merger] Combined soup: " << combined.points.size() << " points, " << combined.polygons.size()
+                  << " polygons\n";
     }
 
     // Step 3: Repair soup (removes duplicate vertices at boundaries!)
     PMP::repair_polygon_soup(combined.points, combined.polygons);
 
     if (verbose) {
-        std::cout << "[Merger] After repair: "
-                  << combined.points.size() << " points "
+        std::cout << "[Merger] After repair: " << combined.points.size() << " points "
                   << "(duplicates merged)\n";
     }
 
@@ -101,8 +92,7 @@ Mesh MeshMerger::merge_submeshes(
 
     if (removed_non_manifold > 0) {
         if (verbose) {
-            std::cout << "[Merger] Removed " << removed_non_manifold
-                      << " non-manifold polygon(s)\n";
+            std::cout << "[Merger] Removed " << removed_non_manifold << " non-manifold polygon(s)\n";
         }
     }
 
@@ -117,15 +107,16 @@ Mesh MeshMerger::merge_submeshes(
     Mesh result = soup_to_mesh(combined);
 
     if (verbose) {
-        std::cout << "[Merger] Final mesh: "
-                  << result.number_of_vertices() << " vertices, "
-                  << result.number_of_faces() << " faces\n";
+        std::cout << "[Merger] Final mesh: " << result.number_of_vertices() << " vertices, " << result.number_of_faces()
+                  << " faces\n";
     }
 
     return result;
 }
 
-MeshMerger::PolygonSoup MeshMerger::to_soup(const Mesh& mesh) {
+MeshMerger::PolygonSoup
+MeshMerger::to_soup(const Mesh& mesh)
+{
     PolygonSoup soup;
 
     PMP::polygon_mesh_to_polygon_soup(mesh, soup.points, soup.polygons);
@@ -133,7 +124,9 @@ MeshMerger::PolygonSoup MeshMerger::to_soup(const Mesh& mesh) {
     return soup;
 }
 
-Mesh MeshMerger::soup_to_mesh(const PolygonSoup& soup) {
+Mesh
+MeshMerger::soup_to_mesh(const PolygonSoup& soup)
+{
     Mesh mesh;
 
     PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, mesh);
@@ -141,4 +134,4 @@ Mesh MeshMerger::soup_to_mesh(const PolygonSoup& soup) {
     return mesh;
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

@@ -10,14 +10,14 @@ namespace MeshRepair {
  * @brief Threading configuration
  */
 struct ThreadingConfig {
-    size_t num_threads = 0;           // 0 = auto (hw_cores / 2)
-    size_t queue_size = 10;           // Pipeline queue size (number of holes buffered)
-    bool verbose = false;
+    size_t num_threads = 0;   // 0 = auto (hw_cores / 2)
+    size_t queue_size  = 10;  // Pipeline queue size (number of holes buffered)
+    bool verbose       = false;
 
     // Derived values (set by ThreadManager)
     size_t detection_threads = 0;
-    size_t filling_threads = 0;
-    size_t hw_cores = 0;
+    size_t filling_threads   = 0;
+    size_t hw_cores          = 0;
 };
 
 /**
@@ -45,9 +45,9 @@ public:
     ThreadPool& get_filling_pool() { return filling_pool_; }
 
     // Reconfigure pools for different phases
-    void enter_detection_phase();     // All threads for detection
-    void enter_pipeline_phase();      // Split: detection + filling
-    void enter_filling_phase();       // All threads for filling
+    void enter_detection_phase();  // All threads for detection
+    void enter_pipeline_phase();   // Split: detection + filling
+    void enter_filling_phase();    // All threads for filling
 
 private:
     ThreadingConfig config_;
@@ -58,6 +58,6 @@ private:
     void print_config() const;
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair
 
-#endif // MESHREPAIR_THREAD_MANAGER_H
+#endif  // MESHREPAIR_THREAD_MANAGER_H

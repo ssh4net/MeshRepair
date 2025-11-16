@@ -8,9 +8,15 @@ namespace PMP = CGAL::Polygon_mesh_processing;
 
 namespace MeshRepair {
 
-HoleDetector::HoleDetector(const Mesh& mesh, bool verbose) : mesh_(mesh), verbose_(verbose) {}
+HoleDetector::HoleDetector(const Mesh& mesh, bool verbose)
+    : mesh_(mesh)
+    , verbose_(verbose)
+{
+}
 
-std::vector<HoleInfo> HoleDetector::detect_all_holes() {
+std::vector<HoleInfo>
+HoleDetector::detect_all_holes()
+{
     std::vector<HoleInfo> holes;
     std::unordered_set<halfedge_descriptor> processed;
 
@@ -33,12 +39,12 @@ std::vector<HoleInfo> HoleDetector::detect_all_holes() {
     if (!holes.empty()) {
         if (verbose_) {
             std::cout << "Detected " << holes.size() << " hole(s):\n";
-            for (size_t i = 0; i < holes.size(); ++i) {
-                const auto& hole = holes[i];
-                std::cout << "  Hole " << (i + 1) << ": "
-                          << hole.boundary_size << " boundary vertices, "
-                          << "diameter ~ " << std::fixed << hole.estimated_diameter << "\n";
-            }
+            //for (size_t i = 0; i < holes.size(); ++i) {
+                //const auto& hole = holes[i];
+                //std::cout << "  Hole " << (i + 1) << ": " << hole.boundary_size << " boundary vertices\n";
+                // Diameter output disabled - can be re-enabled if needed
+                // << "diameter ~ " << std::fixed << hole.estimated_diameter << "\n";
+            // }
         }
     } else {
         if (verbose_) {
@@ -49,11 +55,15 @@ std::vector<HoleInfo> HoleDetector::detect_all_holes() {
     return holes;
 }
 
-bool HoleDetector::is_border_halfedge(const Mesh& mesh, halfedge_descriptor h) {
+bool
+HoleDetector::is_border_halfedge(const Mesh& mesh, halfedge_descriptor h)
+{
     return mesh.is_border(h);
 }
 
-HoleInfo HoleDetector::analyze_hole(const Mesh& mesh, halfedge_descriptor border_h) {
+HoleInfo
+HoleDetector::analyze_hole(const Mesh& mesh, halfedge_descriptor border_h)
+{
     HoleInfo info;
     info.boundary_halfedge = border_h;
 
@@ -74,19 +84,21 @@ HoleInfo HoleDetector::analyze_hole(const Mesh& mesh, halfedge_descriptor border
         boundary_points.push_back(mesh.point(v));
     }
 
-    auto bbox = CGAL::bounding_box(boundary_points.begin(), boundary_points.end());
-    auto diag_squared = CGAL::squared_distance(bbox.min(), bbox.max());
+    auto bbox               = CGAL::bounding_box(boundary_points.begin(), boundary_points.end());
+    auto diag_squared       = CGAL::squared_distance(bbox.min(), bbox.max());
     info.estimated_diameter = std::sqrt(CGAL::to_double(diag_squared));
 
     // Rough area estimate (assumes roughly circular hole)
     // More accurate would be to compute actual polygon area
-    double radius = info.estimated_diameter / 2.0;
+    double radius       = info.estimated_diameter / 2.0;
     info.estimated_area = 3.14159 * radius * radius;
 
     return info;
 }
 
-size_t HoleDetector::count_border_edges(const Mesh& mesh) {
+size_t
+HoleDetector::count_border_edges(const Mesh& mesh)
+{
     size_t count = 0;
     for (auto h : mesh.halfedges()) {
         if (mesh.is_border(h)) {
@@ -96,4 +108,4 @@ size_t HoleDetector::count_border_edges(const Mesh& mesh) {
     return count;
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

@@ -29,10 +29,10 @@ struct Submesh {
     Submesh() = default;
 
     // Move-only type
-    Submesh(const Submesh&) = delete;
+    Submesh(const Submesh&)            = delete;
     Submesh& operator=(const Submesh&) = delete;
-    Submesh(Submesh&&) = default;
-    Submesh& operator=(Submesh&&) = default;
+    Submesh(Submesh&&)                 = default;
+    Submesh& operator=(Submesh&&)      = default;
 };
 
 /// Extracts independent submeshes from a mesh
@@ -46,19 +46,15 @@ public:
     /// @param faces Faces to include in submesh
     /// @param holes Holes whose boundaries lie in these faces
     /// @return Extracted submesh with mapped holes
-    Submesh extract(
-        const std::unordered_set<face_descriptor>& faces,
-        const std::vector<HoleInfo>& holes) const;
+    Submesh extract(const std::unordered_set<face_descriptor>& faces, const std::vector<HoleInfo>& holes) const;
 
     /// Extract submesh for a partition (convenience function)
     /// @param partition_indices Indices of holes in this partition
     /// @param all_holes All holes in the mesh
     /// @param neighborhoods Pre-computed neighborhoods for all holes
     /// @return Extracted submesh
-    Submesh extract_partition(
-        const std::vector<size_t>& partition_indices,
-        const std::vector<HoleInfo>& all_holes,
-        const std::vector<HoleWithNeighborhood>& neighborhoods) const;
+    Submesh extract_partition(const std::vector<size_t>& partition_indices, const std::vector<HoleInfo>& all_holes,
+                              const std::vector<HoleWithNeighborhood>& neighborhoods) const;
 
 private:
     const Mesh& mesh_;
@@ -68,10 +64,8 @@ private:
     /// @param new_mesh The new mesh
     /// @param vertex_map Map from old to new vertex descriptors
     /// @return Corresponding halfedge in new mesh (or null if not found)
-    halfedge_descriptor find_mapped_halfedge(
-        halfedge_descriptor old_halfedge,
-        const Mesh& new_mesh,
-        const std::map<vertex_descriptor, vertex_descriptor>& vertex_map) const;
+    halfedge_descriptor find_mapped_halfedge(halfedge_descriptor old_halfedge, const Mesh& new_mesh,
+                                             const std::map<vertex_descriptor, vertex_descriptor>& vertex_map) const;
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

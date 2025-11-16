@@ -66,36 +66,26 @@ if(WIN32)
 endif()
 
 # Find CGAL
-# Search in CMAKE_PREFIX_PATH first, then fall back to hardcoded paths
-find_package(CGAL QUIET CONFIG)
+# Users should set CMAKE_PREFIX_PATH or CGAL_DIR if CGAL is not in standard location
+find_package(CGAL REQUIRED CONFIG)
 if(NOT CGAL_FOUND)
-    # Try manual paths
-    if(NOT CGAL_DIR)
-        if(EXISTS "/mnt/e/GH/cgal")
-            set(CGAL_DIR "/mnt/e/GH/cgal" CACHE PATH "Path to CGAL directory")
-        elseif(EXISTS "e:/GH/cgal")
-            set(CGAL_DIR "e:/GH/cgal" CACHE PATH "Path to CGAL directory")
-        endif()
-    endif()
-    find_package(CGAL REQUIRED COMPONENTS Core)
-endif()
-if(NOT CGAL_FOUND)
-    message(FATAL_ERROR "CGAL not found. Set CGAL_DIR to CGAL installation directory.")
+    message(FATAL_ERROR
+        "CGAL not found.\n"
+        "Please install CGAL or set one of:\n"
+        "  -DCMAKE_PREFIX_PATH=/path/to/cgal/installation\n"
+        "  -DCGAL_DIR=/path/to/cgal/lib/cmake/CGAL")
 endif()
 message(STATUS "CGAL version: ${CGAL_VERSION}")
 
 # Find Eigen3 (required for fairing)
-# Search in CMAKE_PREFIX_PATH first, then fall back to known locations
+# Users should set CMAKE_PREFIX_PATH or EIGEN3_INCLUDE_DIR if Eigen3 is not in standard location
 find_package(Eigen3 3.2 QUIET CONFIG)
 if(NOT Eigen3_FOUND AND NOT EIGEN3_FOUND)
-    message(STATUS "Eigen3 not found via find_package, trying manual search")
+    message(STATUS "Eigen3 not found via find_package, trying standard system paths")
 
-    # Try to find Eigen3 manually
+    # Try standard system paths only
     if(NOT EIGEN3_INCLUDE_DIR)
         set(_eigen_search_paths
-            "${CMAKE_PREFIX_PATH}/include/eigen3"
-            "/mnt/e/UBS/include/eigen3"
-            "e:/UBS/include/eigen3"
             "/usr/include/eigen3"
             "/usr/local/include/eigen3"
         )
@@ -103,12 +93,13 @@ if(NOT Eigen3_FOUND AND NOT EIGEN3_FOUND)
         foreach(_path ${_eigen_search_paths})
             if(EXISTS "${_path}/Eigen/Core")
                 set(EIGEN3_INCLUDE_DIR "${_path}" CACHE PATH "Path to Eigen3 include directory")
+                message(STATUS "Found Eigen3 in system path: ${EIGEN3_INCLUDE_DIR}")
                 break()
             endif()
         endforeach()
     endif()
 
-    if(EXISTS "${EIGEN3_INCLUDE_DIR}/Eigen/Core")
+    if(EIGEN3_INCLUDE_DIR AND EXISTS "${EIGEN3_INCLUDE_DIR}/Eigen/Core")
         message(STATUS "Using Eigen3 from: ${EIGEN3_INCLUDE_DIR}")
         add_library(Eigen3::Eigen INTERFACE IMPORTED)
         set_target_properties(Eigen3::Eigen PROPERTIES
@@ -116,13 +107,14 @@ if(NOT Eigen3_FOUND AND NOT EIGEN3_FOUND)
         )
         set(EIGEN3_FOUND TRUE)
     else()
-        message(FATAL_ERROR "Eigen3 not found. Set EIGEN3_INCLUDE_DIR or CMAKE_PREFIX_PATH to Eigen3 location.")
+        message(FATAL_ERROR
+            "Eigen3 not found.\n"
+            "Please install Eigen3 or set one of:\n"
+            "  -DCMAKE_PREFIX_PATH=/path/to/eigen3/installation\n"
+            "  -DEIGEN3_INCLUDE_DIR=/path/to/eigen3/include")
     endif()
 else()
     message(STATUS "Eigen3 found via find_package")
-    if(EIGEN3_INCLUDE_DIR)
-        message(STATUS "Eigen3 include dir: ${EIGEN3_INCLUDE_DIR}")
-    endif()
 endif()
 
 # Enable CGAL to use Eigen for fairing
@@ -161,9 +153,35 @@ else()
     message(STATUS "RapidOBJ not found - OBJ loading will use CGAL parser (slower)")
 endif()
 
+# Find nlohmann/json (header-only library for JSON parsing)
+# Required for engine IPC mode
+find_package(nlohmann_json QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(STATUS "nlohmann/json not found via find_package, trying FetchContent")
+
+    # If not found, try to fetch it automatically
+    include(FetchContent)
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.3
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+    message(STATUS "nlohmann/json: fetched from GitHub")
+else()
+    message(STATUS "nlohmann/json found via package")
+endif()
+
 # Source files
 set(MESHREPAIR_SOURCES
     meshrepair/main.cpp
+    meshrepair/cli_main.cpp
+    meshrepair/engine_main.cpp
+    meshrepair/engine/protocol.cpp
+    meshrepair/engine/engine_wrapper.cpp
+    meshrepair/engine/command_handler.cpp
+    meshrepair/engine/mesh_binary.cpp
+    meshrepair/engine/socket_stream.cpp
     meshrepair/mesh_loader.cpp
     meshrepair/hole_detector.cpp
     meshrepair/hole_filler.cpp
@@ -180,6 +198,11 @@ set(MESHREPAIR_SOURCES
 
 # Header files
 set(MESHREPAIR_HEADERS
+    meshrepair/engine/protocol.h
+    meshrepair/engine/engine_wrapper.h
+    meshrepair/engine/command_handler.h
+    meshrepair/engine/mesh_binary.h
+    meshrepair/engine/socket_stream.h
     meshrepair/include/types.h
     meshrepair/include/config.h
     meshrepair/include/mesh_loader.h
@@ -201,31 +224,37 @@ set(MESHREPAIR_HEADERS
 )
 
 # Main executable
-add_executable(mesh_hole_filler
+add_executable(meshrepair
     ${MESHREPAIR_SOURCES}
     ${MESHREPAIR_HEADERS}
 )
 
 # Link libraries
-target_link_libraries(mesh_hole_filler
+target_link_libraries(meshrepair
     CGAL::CGAL
     Eigen3::Eigen
     Threads::Threads
+    nlohmann_json::nlohmann_json
 )
 
 if(RapidOBJ_FOUND)
-    target_link_libraries(mesh_hole_filler RapidOBJ::RapidOBJ)
+    target_link_libraries(meshrepair RapidOBJ::RapidOBJ)
 endif()
 
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(mesh_hole_filler OpenMP::OpenMP_CXX)
-    target_compile_definitions(mesh_hole_filler PRIVATE USE_OPENMP)
+    target_link_libraries(meshrepair OpenMP::OpenMP_CXX)
+    target_compile_definitions(meshrepair PRIVATE USE_OPENMP)
+endif()
+
+# Windows: Link Winsock2 for socket support
+if(WIN32)
+    target_link_libraries(meshrepair ws2_32)
 endif()
 
 # Compiler-specific optimizations (configuration-aware for multi-config generators)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # GCC/Clang flags
-    target_compile_options(mesh_hole_filler PRIVATE
+    target_compile_options(meshrepair PRIVATE
         -Wall
         -Wextra
         $<$<CONFIG:Release>:-O3>
@@ -235,7 +264,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     )
 elseif(MSVC)
     # MSVC flags (supports multi-config generators like Visual Studio)
-    target_compile_options(mesh_hole_filler PRIVATE
+    target_compile_options(meshrepair PRIVATE
         /W4
         $<$<CONFIG:Release>:/O2>
         $<$<CONFIG:Release>:/GL>
@@ -243,18 +272,18 @@ elseif(MSVC)
     )
 
     # Link-time code generation for Release
-    target_link_options(mesh_hole_filler PRIVATE
+    target_link_options(meshrepair PRIVATE
         $<$<CONFIG:Release>:/LTCG>
     )
 
     # Apply debug postfix
-    set_target_properties(mesh_hole_filler PROPERTIES
+    set_target_properties(meshrepair PROPERTIES
         DEBUG_POSTFIX "${CMAKE_DEBUG_POSTFIX}"
     )
 endif()
 
 # Installation
-install(TARGETS mesh_hole_filler
+install(TARGETS meshrepair
     RUNTIME DESTINATION bin
 )
 
@@ -290,6 +319,7 @@ if(RapidOBJ_FOUND)
 else()
     message(STATUS "  RapidOBJ: NOT FOUND (will use CGAL OBJ parser)")
 endif()
+message(STATUS "  nlohmann/json: found (required for engine IPC mode)")
 message(STATUS "")
 message(STATUS "Options:")
 message(STATUS "  Build tests: ${BUILD_TESTS}")

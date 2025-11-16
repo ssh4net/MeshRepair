@@ -15,10 +15,10 @@ namespace MeshRepair {
 class MeshLoader {
 public:
     enum class Format {
-        OBJ,    // Wavefront OBJ format
-        PLY,    // Stanford PLY format
-        OFF,    // Object File Format (CGAL native)
-        AUTO    // Auto-detect from extension
+        OBJ,  // Wavefront OBJ format
+        PLY,  // Stanford PLY format
+        OFF,  // Object File Format (CGAL native)
+        AUTO  // Auto-detect from extension
     };
 
     /**
@@ -28,9 +28,8 @@ public:
      * @param force_cgal_loader Force CGAL OBJ loader instead of RapidOBJ (default: false)
      * @return Loaded mesh on success, std::nullopt on failure
      */
-    static std::optional<Mesh> load(const std::string& filename,
-                                     Format format = Format::AUTO,
-                                     bool force_cgal_loader = false);
+    static std::optional<Mesh> load(const std::string& filename, Format format = Format::AUTO,
+                                    bool force_cgal_loader = false);
 
     /**
      * @brief Save mesh to file
@@ -40,9 +39,7 @@ public:
      * @param binary_ply Use binary PLY format (ignored for OBJ/OFF)
      * @return true on success, false on failure
      */
-    static bool save(const Mesh& mesh,
-                     const std::string& filename,
-                     Format format = Format::AUTO,
+    static bool save(const Mesh& mesh, const std::string& filename, Format format = Format::AUTO,
                      bool binary_ply = true);
 
     /**
@@ -72,4 +69,4 @@ private:
 #endif
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

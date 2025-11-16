@@ -27,8 +27,7 @@ namespace MeshRepair {
 // Simple Thread-Safe Queue
 // ============================================================================
 // Used for simple producer-consumer patterns
-template<typename T>
-class ThreadSafeQueue {
+template<typename T> class ThreadSafeQueue {
 private:
     std::queue<T> queue_;
     mutable std::mutex mtx_;
@@ -37,7 +36,8 @@ private:
 
 public:
     // Push item to queue
-    void push(T item) {
+    void push(T item)
+    {
         {
             std::lock_guard<std::mutex> lock(mtx_);
             queue_.push(std::move(item));
@@ -46,7 +46,8 @@ public:
     }
 
     // Pop item from queue, returns false if finished and empty
-    bool pop(T& item) {
+    bool pop(T& item)
+    {
         std::unique_lock<std::mutex> lock(mtx_);
         cv_.wait(lock, [this] { return !queue_.empty() || finished_; });
 
@@ -64,7 +65,8 @@ public:
     }
 
     // Mark queue as finished (no more items will be pushed)
-    void finish() {
+    void finish()
+    {
         {
             std::lock_guard<std::mutex> lock(mtx_);
             finished_ = true;
@@ -73,13 +75,15 @@ public:
     }
 
     // Get current queue size
-    size_t size() const {
+    size_t size() const
+    {
         std::lock_guard<std::mutex> lock(mtx_);
         return queue_.size();
     }
 
     // Check if queue is empty
-    bool empty() const {
+    bool empty() const
+    {
         std::lock_guard<std::mutex> lock(mtx_);
         return queue_.empty();
     }
@@ -89,8 +93,7 @@ public:
 // Memory-Bounded Queue (from SnapDiver)
 // ============================================================================
 // Useful for large mesh data structures - bounds by memory not count
-template<typename T>
-class BoundedQueue {
+template<typename T> class BoundedQueue {
 private:
     std::queue<T> queue_;
     mutable std::mutex mtx_;
@@ -98,37 +101,38 @@ private:
     std::condition_variable cv_pop_;
     size_t max_memory_bytes_;
     size_t current_memory_bytes_ = 0;
-    bool finished_ = false;
+    bool finished_               = false;
 
     // Helper to detect if type has memory_usage() method
-    template<typename U>
-    static auto get_memory_usage_impl(const U& item, int) -> decltype(item.memory_usage()) {
+    template<typename U> static auto get_memory_usage_impl(const U& item, int) -> decltype(item.memory_usage())
+    {
         return item.memory_usage();
     }
 
-    template<typename U>
-    static size_t get_memory_usage_impl(const U& item, long) {
+    template<typename U> static size_t get_memory_usage_impl(const U& item, long)
+    {
         return sizeof(item);  // Fallback
     }
 
-    template<typename U = T>
-    static size_t get_memory_usage(const U& item) {
-        return get_memory_usage_impl(item, 0);
-    }
+    template<typename U = T> static size_t get_memory_usage(const U& item) { return get_memory_usage_impl(item, 0); }
 
 public:
     explicit BoundedQueue(size_t max_memory_bytes)
-        : max_memory_bytes_(max_memory_bytes) {}
+        : max_memory_bytes_(max_memory_bytes)
+    {
+    }
 
     // Push item, blocks if memory limit reached
-    void push(T item) {
+    void push(T item)
+    {
         size_t item_memory = get_memory_usage(item);
         std::unique_lock<std::mutex> lock(mtx_);
         cv_push_.wait(lock, [this, item_memory] {
             return (current_memory_bytes_ + item_memory <= max_memory_bytes_) || finished_;
         });
 
-        if (finished_) return;
+        if (finished_)
+            return;
 
         current_memory_bytes_ += item_memory;
         queue_.push(std::move(item));
@@ -136,7 +140,8 @@ public:
     }
 
     // Pop item, returns false if finished
-    bool pop(T& item) {
+    bool pop(T& item)
+    {
         try {
             std::unique_lock<std::mutex> lock(mtx_);
 
@@ -176,7 +181,8 @@ public:
     }
 
     // Mark as finished
-    void finish() {
+    void finish()
+    {
         {
             std::lock_guard<std::mutex> lock(mtx_);
             finished_ = true;
@@ -186,19 +192,19 @@ public:
     }
 
     // Get statistics
-    size_t size() const {
+    size_t size() const
+    {
         std::lock_guard<std::mutex> lock(mtx_);
         return queue_.size();
     }
 
-    size_t current_memory() const {
+    size_t current_memory() const
+    {
         std::lock_guard<std::mutex> lock(mtx_);
         return current_memory_bytes_;
     }
 
-    size_t max_memory() const {
-        return max_memory_bytes_;
-    }
+    size_t max_memory() const { return max_memory_bytes_; }
 };
 
 // ============================================================================
@@ -208,39 +214,34 @@ class ThreadPool {
 public:
     // Constructor: Initialize with number of threads and max queue size
     ThreadPool(size_t threads, size_t maxQueueSize = 1000)
-        : stop_(false),
-          working_(0),
-          tasks_count_(0),
-          maxQueueSize_(maxQueueSize)
+        : stop_(false)
+        , working_(0)
+        , tasks_count_(0)
+        , maxQueueSize_(maxQueueSize)
     {
         // Create worker threads
         for (size_t i = 0; i < threads; ++i) {
-            workers_.emplace_back([this] {
-                worker_function();
-            });
+            workers_.emplace_back([this] { worker_function(); });
         }
     }
 
     // Deleted copy/move constructors
-    ThreadPool(const ThreadPool&) = delete;
+    ThreadPool(const ThreadPool&)            = delete;
     ThreadPool& operator=(const ThreadPool&) = delete;
-    ThreadPool(ThreadPool&&) = delete;
-    ThreadPool& operator=(ThreadPool&&) = delete;
+    ThreadPool(ThreadPool&&)                 = delete;
+    ThreadPool& operator=(ThreadPool&&)      = delete;
 
     // Enqueue a task with arguments, returns std::future for result
     template<class F, class... Args>
-    auto enqueue(F&& f, Args&&... args)
-        -> std::future<std::invoke_result_t<F, Args...>>
+    auto enqueue(F&& f, Args&&... args) -> std::future<std::invoke_result_t<F, Args...>>
     {
         using return_type = std::invoke_result_t<F, Args...>;
 
         // Create packaged_task with bound function and arguments
         auto task = std::make_shared<std::packaged_task<return_type()>>(
-            [f = std::forward<F>(f),
-             args = std::make_tuple(std::forward<Args>(args)...)]() mutable -> return_type {
+            [f = std::forward<F>(f), args = std::make_tuple(std::forward<Args>(args)...)]() mutable -> return_type {
                 return std::apply(f, std::move(args));
-            }
-        );
+            });
 
         std::future<return_type> result = task->get_future();
 
@@ -252,9 +253,7 @@ public:
             }
 
             // Wait until there's space in queue or pool is stopped
-            condition_.wait(lock, [this] {
-                return tasks_count_ < maxQueueSize_ || stop_;
-            });
+            condition_.wait(lock, [this] { return tasks_count_ < maxQueueSize_ || stop_; });
 
             if (stop_) {
                 throw std::runtime_error("enqueue on stopped ThreadPool");
@@ -271,19 +270,22 @@ public:
     }
 
     // Check if pool is idle (no tasks and no active workers)
-    bool isIdle() {
+    bool isIdle()
+    {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         return tasks_.empty() && (working_ == 0);
     }
 
     // Wait for all tasks to complete
-    void waitForAllTasks() {
+    void waitForAllTasks()
+    {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         done_condition_.wait(lock, [this] { return tasks_count_ == 0; });
     }
 
     // Dynamically adjust max queue size
-    void setMaxQueueSize(size_t limit) {
+    void setMaxQueueSize(size_t limit)
+    {
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
             maxQueueSize_ = limit;
@@ -292,24 +294,25 @@ public:
     }
 
     // Get current queue size
-    size_t queueSize() const {
+    size_t queueSize() const
+    {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         return tasks_count_;
     }
 
     // Get number of active workers
-    size_t activeWorkers() const {
+    size_t activeWorkers() const
+    {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         return working_;
     }
 
     // Get total number of worker threads
-    size_t threadCount() const {
-        return workers_.size();
-    }
+    size_t threadCount() const { return workers_.size(); }
 
     // Resize thread pool dynamically
-    void resize(size_t new_thread_count) {
+    void resize(size_t new_thread_count)
+    {
         if (new_thread_count == workers_.size()) {
             return;  // No change needed
         }
@@ -343,15 +346,14 @@ public:
             size_t to_add = new_thread_count - workers_.size();
 
             for (size_t i = 0; i < to_add; ++i) {
-                workers_.emplace_back([this] {
-                    worker_function();
-                });
+                workers_.emplace_back([this] { worker_function(); });
             }
         }
     }
 
     // Destructor: Stop and join all threads
-    ~ThreadPool() {
+    ~ThreadPool()
+    {
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
             stop_ = true;
@@ -366,20 +368,21 @@ public:
     }
 
 private:
-    std::vector<std::thread> workers_;              // Worker threads
-    std::queue<std::function<void()>> tasks_;       // Task queue
+    std::vector<std::thread> workers_;         // Worker threads
+    std::queue<std::function<void()>> tasks_;  // Task queue
 
-    mutable std::mutex queue_mutex_;                // Protects task queue
-    std::condition_variable condition_;             // Task availability + queue space
-    std::condition_variable done_condition_;        // Task completion
+    mutable std::mutex queue_mutex_;          // Protects task queue
+    std::condition_variable condition_;       // Task availability + queue space
+    std::condition_variable done_condition_;  // Task completion
 
-    bool stop_;                                     // Stop flag
-    size_t working_;                                // Active worker count
-    size_t tasks_count_;                            // Tasks in queue
-    size_t maxQueueSize_;                           // Max queue size
+    bool stop_;            // Stop flag
+    size_t working_;       // Active worker count
+    size_t tasks_count_;   // Tasks in queue
+    size_t maxQueueSize_;  // Max queue size
 
     // Worker thread function
-    void worker_function() {
+    void worker_function()
+    {
         while (true) {
             std::function<void()> task;
 
@@ -387,9 +390,7 @@ private:
                 std::unique_lock<std::mutex> lock(queue_mutex_);
 
                 // Wait for task or stop signal
-                condition_.wait(lock, [this] {
-                    return stop_ || !tasks_.empty();
-                });
+                condition_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
 
                 if (stop_ && tasks_.empty()) {
                     return;  // Exit thread
@@ -404,12 +405,11 @@ private:
             // Execute task with exception safety
             try {
                 task();
-            }
-            catch (const std::exception& e) {
+            } catch (const std::exception& e) {
+                (void)e;  // Unused - silently ignored
                 // Silently ignore exceptions - they're already handled in the task
                 // Adding output here causes Windows console deadlock
-            }
-            catch (...) {
+            } catch (...) {
                 // Silently ignore unknown exceptions
             }
 
@@ -427,7 +427,9 @@ private:
 // ============================================================================
 // Helper: Get hardware core count
 // ============================================================================
-inline size_t get_hardware_cores() {
+inline size_t
+get_hardware_cores()
+{
     unsigned int hw = std::thread::hardware_concurrency();
     return (hw > 0) ? hw : 4;  // Fallback to 4 if detection fails
 }
@@ -435,7 +437,9 @@ inline size_t get_hardware_cores() {
 // ============================================================================
 // Helper: Get default thread count (half of hardware cores)
 // ============================================================================
-inline size_t get_default_thread_count() {
+inline size_t
+get_default_thread_count()
+{
     size_t hw_cores = get_hardware_cores();
     return std::max<size_t>(1, hw_cores / 2);  // Half of hardware cores, minimum 1
 }
@@ -449,28 +453,26 @@ private:
     size_t total_;
 
 public:
-    AtomicProgress(size_t total) : current_(0), total_(total) {}
-
-    void increment(size_t count = 1) {
-        current_.fetch_add(count, std::memory_order_relaxed);
+    AtomicProgress(size_t total)
+        : current_(0)
+        , total_(total)
+    {
     }
 
-    size_t get_current() const {
-        return current_.load(std::memory_order_relaxed);
-    }
+    void increment(size_t count = 1) { current_.fetch_add(count, std::memory_order_relaxed); }
 
-    size_t get_total() const {
-        return total_;
-    }
+    size_t get_current() const { return current_.load(std::memory_order_relaxed); }
 
-    float get_percentage() const {
-        if (total_ == 0) return 100.0f;
+    size_t get_total() const { return total_; }
+
+    float get_percentage() const
+    {
+        if (total_ == 0)
+            return 100.0f;
         return (float)current_ / total_ * 100.0f;
     }
 
-    bool is_complete() const {
-        return current_.load(std::memory_order_relaxed) >= total_;
-    }
+    bool is_complete() const { return current_.load(std::memory_order_relaxed) >= total_; }
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

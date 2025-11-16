@@ -22,10 +22,7 @@ namespace MeshRepair {
  */
 class PipelineProcessor {
 public:
-    PipelineProcessor(
-        Mesh& mesh,
-        ThreadManager& thread_manager,
-        const FillingOptions& filling_options);
+    PipelineProcessor(Mesh& mesh, ThreadManager& thread_manager, const FillingOptions& filling_options);
 
     /**
      * @brief Pipeline processing: detect and fill holes simultaneously
@@ -47,19 +44,14 @@ private:
     FillingOptions filling_options_;
 
     // Detection phase (producer)
-    void detect_holes_async(
-        BoundedQueue<HoleInfo>& hole_queue,
-        std::atomic<bool>& detection_done,
-        std::atomic<size_t>& holes_detected);
+    void detect_holes_async(BoundedQueue<HoleInfo>& hole_queue, std::atomic<bool>& detection_done,
+                            std::atomic<size_t>& holes_detected);
 
     // Filling phase (consumer)
-    void fill_holes_async(
-        BoundedQueue<HoleInfo>& hole_queue,
-        std::atomic<bool>& detection_done,
-        std::vector<HoleStatistics>& results,
-        std::mutex& results_mutex);
+    void fill_holes_async(BoundedQueue<HoleInfo>& hole_queue, std::atomic<bool>& detection_done,
+                          std::vector<HoleStatistics>& results, std::mutex& results_mutex);
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair
 
-#endif // MESHREPAIR_PIPELINE_PROCESSOR_H
+#endif  // MESHREPAIR_PIPELINE_PROCESSOR_H

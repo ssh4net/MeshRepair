@@ -17,18 +17,18 @@ struct FillingOptions {
 
     // Size limits to prevent processing excessively large holes
     size_t max_hole_boundary_vertices = Config::DEFAULT_MAX_HOLE_BOUNDARY;
-    double max_hole_diameter_ratio = Config::DEFAULT_MAX_HOLE_DIAMETER_RATIO;
+    double max_hole_diameter_ratio    = Config::DEFAULT_MAX_HOLE_DIAMETER_RATIO;
 
     // Algorithm preferences
-    bool use_2d_cdt = Config::DEFAULT_USE_2D_CDT;              // Try 2D constrained Delaunay first
-    bool use_3d_delaunay = Config::DEFAULT_USE_3D_DELAUNAY;    // Fallback to 3D Delaunay
+    bool use_2d_cdt        = Config::DEFAULT_USE_2D_CDT;       // Try 2D constrained Delaunay first
+    bool use_3d_delaunay   = Config::DEFAULT_USE_3D_DELAUNAY;  // Fallback to 3D Delaunay
     bool skip_cubic_search = Config::DEFAULT_SKIP_CUBIC;       // Skip exhaustive cubic search
 
     // Refinement
-    bool refine = Config::DEFAULT_REFINE;                      // Refine patch to match local density
+    bool refine = Config::DEFAULT_REFINE;  // Refine patch to match local density
 
     // Output verbosity
-    bool verbose = false;
+    bool verbose       = false;
     bool show_progress = true;
 };
 
@@ -53,7 +53,7 @@ public:
      * @param mesh Mesh to modify (will be updated in-place)
      * @param options Filling algorithm configuration
      */
-    explicit HoleFiller(Mesh& mesh, const FillingOptions& options = FillingOptions{});
+    explicit HoleFiller(Mesh& mesh, const FillingOptions& options = FillingOptions {});
 
     /**
      * @brief Fill a single hole
@@ -91,4 +91,4 @@ private:
     void report_progress(size_t current, size_t total, const std::string& message) const;
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

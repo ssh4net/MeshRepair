@@ -18,9 +18,9 @@ endif()
 # Manual search if config not found
 set(CGAL_SEARCH_PATHS
     ${CGAL_DIR}
-    /mnt/e/GH/cgal
     /usr/local
     /usr
+    /opt/local
     $ENV{CGAL_DIR}
 )
 

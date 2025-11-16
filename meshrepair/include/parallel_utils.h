@@ -11,13 +11,16 @@ namespace MeshRepair {
 /**
  * @brief Partition description for parallel processing
  */
-template<typename DescriptorType>
-struct MeshPartition {
+template<typename DescriptorType> struct MeshPartition {
     std::vector<DescriptorType> descriptors;
     size_t start_idx;
     size_t count;
 
-    MeshPartition() : start_idx(0), count(0) {}
+    MeshPartition()
+        : start_idx(0)
+        , count(0)
+    {
+    }
 };
 
 /**
@@ -27,7 +30,8 @@ struct MeshPartition {
  * @return Vector of vertex partitions
  */
 inline std::vector<MeshPartition<vertex_descriptor>>
-partition_vertices(const Mesh& mesh, size_t num_partitions) {
+partition_vertices(const Mesh& mesh, size_t num_partitions)
+{
     std::vector<MeshPartition<vertex_descriptor>> partitions;
 
     if (num_partitions == 0) {
@@ -52,10 +56,10 @@ partition_vertices(const Mesh& mesh, size_t num_partitions) {
     for (size_t i = 0; i < total; i += chunk_size) {
         MeshPartition<vertex_descriptor> partition;
         partition.start_idx = i;
-        partition.count = std::min(chunk_size, total - i);
+        partition.count     = std::min(chunk_size, total - i);
 
         auto start_it = all_vertices.begin() + i;
-        auto end_it = start_it + partition.count;
+        auto end_it   = start_it + partition.count;
         partition.descriptors.assign(start_it, end_it);
 
         partitions.push_back(std::move(partition));
@@ -71,7 +75,8 @@ partition_vertices(const Mesh& mesh, size_t num_partitions) {
  * @return Vector of face partitions
  */
 inline std::vector<MeshPartition<face_descriptor>>
-partition_faces(const Mesh& mesh, size_t num_partitions) {
+partition_faces(const Mesh& mesh, size_t num_partitions)
+{
     std::vector<MeshPartition<face_descriptor>> partitions;
 
     if (num_partitions == 0) {
@@ -96,10 +101,10 @@ partition_faces(const Mesh& mesh, size_t num_partitions) {
     for (size_t i = 0; i < total; i += chunk_size) {
         MeshPartition<face_descriptor> partition;
         partition.start_idx = i;
-        partition.count = std::min(chunk_size, total - i);
+        partition.count     = std::min(chunk_size, total - i);
 
         auto start_it = all_faces.begin() + i;
-        auto end_it = start_it + partition.count;
+        auto end_it   = start_it + partition.count;
         partition.descriptors.assign(start_it, end_it);
 
         partitions.push_back(std::move(partition));
@@ -115,7 +120,8 @@ partition_faces(const Mesh& mesh, size_t num_partitions) {
  * @return Vector of halfedge partitions
  */
 inline std::vector<MeshPartition<halfedge_descriptor>>
-partition_halfedges(const Mesh& mesh, size_t num_partitions) {
+partition_halfedges(const Mesh& mesh, size_t num_partitions)
+{
     std::vector<MeshPartition<halfedge_descriptor>> partitions;
 
     if (num_partitions == 0) {
@@ -140,10 +146,10 @@ partition_halfedges(const Mesh& mesh, size_t num_partitions) {
     for (size_t i = 0; i < total; i += chunk_size) {
         MeshPartition<halfedge_descriptor> partition;
         partition.start_idx = i;
-        partition.count = std::min(chunk_size, total - i);
+        partition.count     = std::min(chunk_size, total - i);
 
         auto start_it = all_halfedges.begin() + i;
-        auto end_it = start_it + partition.count;
+        auto end_it   = start_it + partition.count;
         partition.descriptors.assign(start_it, end_it);
 
         partitions.push_back(std::move(partition));
@@ -152,6 +158,6 @@ partition_halfedges(const Mesh& mesh, size_t num_partitions) {
     return partitions;
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair
 
-#endif // MESHREPAIR_PARALLEL_UTILS_H
+#endif  // MESHREPAIR_PARALLEL_UTILS_H

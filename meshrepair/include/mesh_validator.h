@@ -60,4 +60,4 @@ public:
     static std::string generate_report(const Mesh& mesh);
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

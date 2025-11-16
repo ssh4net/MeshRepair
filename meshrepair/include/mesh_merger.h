@@ -14,10 +14,7 @@ public:
     /// @param submeshes Vector of filled submeshes to merge
     /// @param verbose Print progress information
     /// @return Merged mesh
-    static Mesh merge_submeshes(
-        const Mesh& original_mesh,
-        const std::vector<Submesh>& submeshes,
-        bool verbose = false);
+    static Mesh merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh>& submeshes, bool verbose = false);
 
 private:
     /// Intermediate polygon soup representation
@@ -39,4 +36,4 @@ private:
     static Mesh soup_to_mesh(const PolygonSoup& soup);
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

@@ -19,10 +19,7 @@ public:
     /// @param mesh The mesh to process (will be modified in place)
     /// @param thread_manager Thread pool manager
     /// @param filling_options Options for hole filling
-    ParallelHoleFillerPipeline(
-        Mesh& mesh,
-        ThreadManager& thread_manager,
-        const FillingOptions& filling_options);
+    ParallelHoleFillerPipeline(Mesh& mesh, ThreadManager& thread_manager, const FillingOptions& filling_options);
 
     /// Process mesh using partitioned parallel approach
     /// @param verbose Print progress information
@@ -38,9 +35,7 @@ private:
     /// Fill holes in a single submesh (called in parallel)
     /// @param submesh The submesh to process (moved in, moved out)
     /// @return Processed submesh with holes filled
-    static Submesh fill_submesh_holes(
-        Submesh submesh,
-        const FillingOptions& options);
+    static Submesh fill_submesh_holes(Submesh submesh, const FillingOptions& options);
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

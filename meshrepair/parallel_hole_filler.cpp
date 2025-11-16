@@ -7,21 +7,22 @@
 
 namespace MeshRepair {
 
-ParallelHoleFillerPipeline::ParallelHoleFillerPipeline(
-    Mesh& mesh,
-    ThreadManager& thread_manager,
-    const FillingOptions& filling_options)
+ParallelHoleFillerPipeline::ParallelHoleFillerPipeline(Mesh& mesh, ThreadManager& thread_manager,
+                                                       const FillingOptions& filling_options)
     : mesh_(mesh)
     , thread_manager_(thread_manager)
     , filling_options_(filling_options)
-{}
+{
+}
 
-MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug) {
+MeshStatistics
+ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug)
+{
     auto start_time = std::chrono::high_resolution_clock::now();
 
     MeshStatistics stats;
     stats.original_vertices = mesh_.number_of_vertices();
-    stats.original_faces = mesh_.number_of_faces();
+    stats.original_faces    = mesh_.number_of_faces();
 
     // Debug: Save original mesh before partitioning
     if (debug) {
@@ -46,7 +47,7 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
     if (holes.empty()) {
         std::cout << "No holes detected.\n";
         stats.final_vertices = stats.original_vertices;
-        stats.final_faces = stats.original_faces;
+        stats.final_faces    = stats.original_faces;
         return stats;
     }
 
@@ -68,12 +69,10 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
     auto partitions = partitioner.partition_holes_by_count(holes, num_partitions);
 
     if (verbose) {
-        std::cout << "[Partitioned] Created " << partitions.size()
-                  << " partition(s) for " << thread_manager_.get_filling_threads()
-                  << " thread(s):\n";
+        std::cout << "[Partitioned] Created " << partitions.size() << " partition(s) for "
+                  << thread_manager_.get_filling_threads() << " thread(s):\n";
         for (size_t i = 0; i < partitions.size(); ++i) {
-            std::cout << "  Partition " << i << ": "
-                      << partitions[i].size() << " hole(s)\n";
+            std::cout << "  Partition " << i << ": " << partitions[i].size() << " hole(s)\n";
         }
     }
 
@@ -89,8 +88,7 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
     }
 
     if (verbose) {
-        std::cout << "[Partitioned] Computed " << neighborhoods.size()
-                  << " neighborhood(s) with "
+        std::cout << "[Partitioned] Computed " << neighborhoods.size() << " neighborhood(s) with "
                   << partitioner.get_ring_count() << "-ring radius\n";
     }
 
@@ -107,13 +105,10 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
     }
 
     if (verbose) {
-        std::cout << "[Partitioned] Extracted " << submeshes.size()
-                  << " submesh(es)\n";
+        std::cout << "[Partitioned] Extracted " << submeshes.size() << " submesh(es)\n";
         for (size_t i = 0; i < submeshes.size(); ++i) {
-            std::cout << "  Submesh " << i << ": "
-                      << submeshes[i].mesh.number_of_vertices() << " vertices, "
-                      << submeshes[i].mesh.number_of_faces() << " faces, "
-                      << submeshes[i].holes.size() << " hole(s)\n";
+            std::cout << "  Submesh " << i << ": " << submeshes[i].mesh.number_of_vertices() << " vertices, "
+                      << submeshes[i].mesh.number_of_faces() << " faces, " << submeshes[i].holes.size() << " hole(s)\n";
         }
     }
 
@@ -121,15 +116,12 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
     if (debug) {
         for (size_t i = 0; i < submeshes.size(); ++i) {
             std::ostringstream oss;
-            oss << "debug_06_partition_" << std::setw(3) << std::setfill('0') << i
-                << "_unfilled.ply";
+            oss << "debug_06_partition_" << std::setw(3) << std::setfill('0') << i << "_unfilled.ply";
             std::string debug_file = oss.str();
 
-            if (CGAL::IO::write_PLY(debug_file, submeshes[i].mesh,
-                                   CGAL::parameters::use_binary_mode(true))) {
+            if (CGAL::IO::write_PLY(debug_file, submeshes[i].mesh, CGAL::parameters::use_binary_mode(true))) {
                 if (verbose) {
-                    std::cout << "  [DEBUG] Saved partition " << i << " (unfilled): "
-                              << debug_file << "\n";
+                    std::cout << "  [DEBUG] Saved partition " << i << " (unfilled): " << debug_file << "\n";
                 }
             }
         }
@@ -137,8 +129,8 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
 
     // Phase 5: Fill holes in parallel
     if (verbose) {
-        std::cout << "\n[Partitioned] Phase 5: Filling holes in parallel ("
-                  << thread_manager_.get_filling_threads() << " thread(s))...\n";
+        std::cout << "\n[Partitioned] Phase 5: Filling holes in parallel (" << thread_manager_.get_filling_threads()
+                  << " thread(s))...\n";
     }
 
     auto& pool = thread_manager_.get_filling_pool();
@@ -147,11 +139,9 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
 
     // Launch parallel tasks
     for (auto& submesh : submeshes) {
-        futures.push_back(pool.enqueue(
-            [submesh = std::move(submesh), options = filling_options_]() mutable {
-                return fill_submesh_holes(std::move(submesh), options);
-            }
-        ));
+        futures.push_back(pool.enqueue([submesh = std::move(submesh), options = filling_options_]() mutable {
+            return fill_submesh_holes(std::move(submesh), options);
+        }));
     }
 
     // Collect results (pre-allocate for indexed access)
@@ -165,8 +155,7 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
 
         if (verbose) {
             const auto& sm = filled_submeshes[i];
-            std::cout << "[Partitioned] Submesh " << i << " completed: "
-                      << sm.mesh.number_of_faces() << " faces\n";
+            std::cout << "[Partitioned] Submesh " << i << " completed: " << sm.mesh.number_of_faces() << " faces\n";
         }
     }
 
@@ -174,15 +163,12 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
     if (debug) {
         for (size_t i = 0; i < filled_submeshes.size(); ++i) {
             std::ostringstream oss;
-            oss << "debug_07_partition_" << std::setw(3) << std::setfill('0') << i
-                << "_filled.ply";
+            oss << "debug_07_partition_" << std::setw(3) << std::setfill('0') << i << "_filled.ply";
             std::string debug_file = oss.str();
 
-            if (CGAL::IO::write_PLY(debug_file, filled_submeshes[i].mesh,
-                                   CGAL::parameters::use_binary_mode(true))) {
+            if (CGAL::IO::write_PLY(debug_file, filled_submeshes[i].mesh, CGAL::parameters::use_binary_mode(true))) {
                 if (verbose) {
-                    std::cout << "  [DEBUG] Saved partition " << i << " (filled): "
-                              << debug_file << "\n";
+                    std::cout << "  [DEBUG] Saved partition " << i << " (filled): " << debug_file << "\n";
                 }
             }
         }
@@ -213,37 +199,32 @@ MeshStatistics ParallelHoleFillerPipeline::process_partitioned(bool verbose, boo
         }
     }
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    stats.total_time_ms = std::chrono::duration<double, std::milli>(
-        end_time - start_time).count();
+    auto end_time       = std::chrono::high_resolution_clock::now();
+    stats.total_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
     stats.final_vertices = mesh_.number_of_vertices();
-    stats.final_faces = mesh_.number_of_faces();
+    stats.final_faces    = mesh_.number_of_faces();
 
     if (verbose) {
         std::cout << "\n[Partitioned] Complete!\n";
-        std::cout << "  Original: " << stats.original_vertices << " vertices, "
-                  << stats.original_faces << " faces\n";
-        std::cout << "  Final: " << stats.final_vertices << " vertices, "
-                  << stats.final_faces << " faces\n";
-        std::cout << "  Holes filled: " << stats.num_holes_filled << "/"
-                  << stats.num_holes_detected << "\n";
+        std::cout << "  Original: " << stats.original_vertices << " vertices, " << stats.original_faces << " faces\n";
+        std::cout << "  Final: " << stats.final_vertices << " vertices, " << stats.final_faces << " faces\n";
+        std::cout << "  Holes filled: " << stats.num_holes_filled << "/" << stats.num_holes_detected << "\n";
         std::cout << "  Total time: " << stats.total_time_ms << " ms\n";
     }
 
     return stats;
 }
 
-Submesh ParallelHoleFillerPipeline::fill_submesh_holes(
-    Submesh submesh,
-    const FillingOptions& options)
+Submesh
+ParallelHoleFillerPipeline::fill_submesh_holes(Submesh submesh, const FillingOptions& options)
 {
     // Each thread owns its submesh - fully thread-safe!
 
     // Create a non-verbose copy of options for parallel filling
     // (to avoid console I/O race conditions)
     FillingOptions thread_options = options;
-    thread_options.verbose = false;
+    thread_options.verbose        = false;
 
     HoleFiller filler(submesh.mesh, thread_options);
 
@@ -256,4 +237,4 @@ Submesh ParallelHoleFillerPipeline::fill_submesh_holes(
     return submesh;  // Return by value (move semantics)
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

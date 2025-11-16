@@ -24,7 +24,10 @@ struct HoleWithNeighborhood {
     CGAL::Bbox_3 bbox;
 
     HoleWithNeighborhood() = default;
-    HoleWithNeighborhood(const HoleInfo& h) : hole(h) {}
+    HoleWithNeighborhood(const HoleInfo& h)
+        : hole(h)
+    {
+    }
 };
 
 /// Partitions holes into independent groups for parallel processing
@@ -44,9 +47,8 @@ public:
     /// @param holes All holes to partition
     /// @param num_partitions Number of partitions to create
     /// @return Vector of partitions, each partition is a vector of hole indices
-    std::vector<std::vector<size_t>> partition_holes_by_count(
-        const std::vector<HoleInfo>& holes,
-        size_t num_partitions) const;
+    std::vector<std::vector<size_t>> partition_holes_by_count(const std::vector<HoleInfo>& holes,
+                                                              size_t num_partitions) const;
 
     /// Get number of rings used for neighborhood computation
     unsigned int get_ring_count() const { return n_rings_; }
@@ -58,8 +60,8 @@ private:
     /// Collect all faces adjacent to vertices in the neighborhood
     /// @param vertices Vertices in neighborhood
     /// @return Set of faces
-    std::unordered_set<face_descriptor> collect_adjacent_faces(
-        const std::unordered_set<vertex_descriptor>& vertices) const;
+    std::unordered_set<face_descriptor>
+    collect_adjacent_faces(const std::unordered_set<vertex_descriptor>& vertices) const;
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

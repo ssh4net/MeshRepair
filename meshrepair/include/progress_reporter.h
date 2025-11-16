@@ -48,7 +48,7 @@ public:
     bool is_enabled() const { return enabled_; }
 
 private:
-    bool enabled_ = true;
+    bool enabled_       = true;
     size_t total_steps_ = 0;
     std::string operation_name_;
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time_;
@@ -57,4 +57,4 @@ private:
     void print_progress_bar(size_t current, size_t total, double elapsed_seconds);
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

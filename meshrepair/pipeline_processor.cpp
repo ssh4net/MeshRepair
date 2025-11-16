@@ -7,32 +7,32 @@
 
 namespace MeshRepair {
 
-PipelineProcessor::PipelineProcessor(
-    Mesh& mesh,
-    ThreadManager& thread_manager,
-    const FillingOptions& filling_options)
+PipelineProcessor::PipelineProcessor(Mesh& mesh, ThreadManager& thread_manager, const FillingOptions& filling_options)
     : mesh_(mesh)
     , thread_manager_(thread_manager)
     , filling_options_(filling_options)
-{}
+{
+}
 
-MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
+MeshStatistics
+PipelineProcessor::process_pipeline(bool verbose)
+{
     auto start_time = std::chrono::high_resolution_clock::now();
 
     MeshStatistics stats;
     stats.original_vertices = mesh_.number_of_vertices();
-    stats.original_faces = mesh_.number_of_faces();
+    stats.original_faces    = mesh_.number_of_faces();
 
     // Enter pipeline phase: split threads between detection and filling
     thread_manager_.enter_pipeline_phase();
 
     // Create bounded queue for pipeline
-    size_t queue_memory = thread_manager_.get_queue_size() * sizeof(HoleInfo) * 100; // Rough estimate
+    size_t queue_memory = thread_manager_.get_queue_size() * sizeof(HoleInfo) * 100;  // Rough estimate
     BoundedQueue<HoleInfo> hole_queue(queue_memory);
 
     // Shared state
-    std::atomic<bool> detection_done{false};
-    std::atomic<size_t> holes_detected{0};
+    std::atomic<bool> detection_done { false };
+    std::atomic<size_t> holes_detected { 0 };
     std::vector<HoleStatistics> results;
     std::mutex results_mutex;
 
@@ -50,17 +50,15 @@ MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
         std::cout << "[Pipeline] Enqueueing detection task...\n";
     }
 
-    auto detection_future = detection_pool.enqueue(
-        [this, &hole_queue, &detection_done, &holes_detected, verbose]() {
-            if (verbose) {
-                thread_safe_cout() << "[Pipeline] Detection thread started\n";
-            }
-            detect_holes_async(hole_queue, detection_done, holes_detected);
-            if (verbose) {
-                thread_safe_cout() << "[Pipeline] Detection thread finished\n";
-            }
+    auto detection_future = detection_pool.enqueue([this, &hole_queue, &detection_done, &holes_detected, verbose]() {
+        if (verbose) {
+            thread_safe_cout() << "[Pipeline] Detection thread started\n";
         }
-    );
+        detect_holes_async(hole_queue, detection_done, holes_detected);
+        if (verbose) {
+            thread_safe_cout() << "[Pipeline] Detection thread finished\n";
+        }
+    });
 
     if (verbose) {
         std::cout << "[Pipeline] Detection task enqueued\n";
@@ -80,18 +78,15 @@ MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
         }
 
         filling_futures.push_back(
-            filling_pool.enqueue(
-                [this, &hole_queue, &detection_done, &results, &results_mutex, i, verbose]() {
-                    if (verbose) {
-                        thread_safe_cout() << "[Pipeline] Filling thread " << i << " started\n";
-                    }
-                    fill_holes_async(hole_queue, detection_done, results, results_mutex);
-                    if (verbose) {
-                        thread_safe_cout() << "[Pipeline] Filling thread " << i << " finished\n";
-                    }
+            filling_pool.enqueue([this, &hole_queue, &detection_done, &results, &results_mutex, i, verbose]() {
+                if (verbose) {
+                    thread_safe_cout() << "[Pipeline] Filling thread " << i << " started\n";
                 }
-            )
-        );
+                fill_holes_async(hole_queue, detection_done, results, results_mutex);
+                if (verbose) {
+                    thread_safe_cout() << "[Pipeline] Filling thread " << i << " finished\n";
+                }
+            }));
 
         if (verbose) {
             std::cout << "[Pipeline] Filling task " << i << " enqueued\n";
@@ -119,14 +114,20 @@ MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
         hole_queue.finish();
         // Wait for filling threads to exit
         for (auto& f : filling_futures) {
-            try { f.get(); } catch (...) {}
+            try {
+                f.get();
+            } catch (...) {
+            }
         }
         throw;  // Re-throw to caller
     } catch (...) {
         std::cout << "[Pipeline] ERROR: Detection thread threw unknown exception\n";
         hole_queue.finish();
         for (auto& f : filling_futures) {
-            try { f.get(); } catch (...) {}
+            try {
+                f.get();
+            } catch (...) {
+            }
         }
         throw;
     }
@@ -157,8 +158,7 @@ MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
                 std::cout << "[Pipeline] Filling thread " << i << " completed\n";
             }
         } catch (const std::exception& e) {
-            std::cout << "[Pipeline] ERROR: Filling thread " << i << " threw exception: "
-                      << e.what() << "\n";
+            std::cout << "[Pipeline] ERROR: Filling thread " << i << " threw exception: " << e.what() << "\n";
         } catch (...) {
             std::cout << "[Pipeline] ERROR: Filling thread " << i << " threw unknown exception\n";
         }
@@ -172,8 +172,7 @@ MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
 
     // Build statistics
     stats.num_holes_detected = holes_detected.load();
-    stats.total_time_ms = std::chrono::duration<double, std::milli>(
-        end_time - start_time).count();
+    stats.total_time_ms      = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
     // Aggregate results
     {
@@ -190,23 +189,21 @@ MeshStatistics PipelineProcessor::process_pipeline(bool verbose) {
     }
 
     stats.final_vertices = mesh_.number_of_vertices();
-    stats.final_faces = mesh_.number_of_faces();
+    stats.final_faces    = mesh_.number_of_faces();
 
     return stats;
 }
 
-void PipelineProcessor::detect_holes_async(
-    BoundedQueue<HoleInfo>& hole_queue,
-    std::atomic<bool>& detection_done,
-    std::atomic<size_t>& holes_detected)
+void
+PipelineProcessor::detect_holes_async(BoundedQueue<HoleInfo>& hole_queue, std::atomic<bool>& detection_done,
+                                      std::atomic<size_t>& holes_detected)
 {
     // Use parallel border detection if multiple threads available
     std::vector<halfedge_descriptor> border_halfedges;
 
     auto& pool = thread_manager_.get_detection_pool();
     if (pool.threadCount() > 1) {
-        border_halfedges = find_border_halfedges_parallel(
-            mesh_, pool, filling_options_.verbose);
+        border_halfedges = find_border_halfedges_parallel(mesh_, pool, filling_options_.verbose);
     } else {
         // Sequential fallback
         for (auto h : mesh_.halfedges()) {
@@ -216,8 +213,7 @@ void PipelineProcessor::detect_holes_async(
         }
 
         if (filling_options_.verbose) {
-            std::cout << "  [Detection] Found " << border_halfedges.size()
-                      << " border halfedges\n";
+            std::cout << "  [Detection] Found " << border_halfedges.size() << " border halfedges\n";
         }
     }
 
@@ -244,8 +240,8 @@ void PipelineProcessor::detect_holes_async(
         size_t count = holes_detected.fetch_add(1) + 1;
 
         if (filling_options_.verbose) {
-            std::cout << "  [Pipeline] Hole " << count
-                      << " detected (" << hole.boundary_size << " vertices), queued for filling\n";
+            std::cout << "  [Pipeline] Hole " << count << " detected (" << hole.boundary_size
+                      << " vertices), queued for filling\n";
         }
     }
 
@@ -256,11 +252,9 @@ void PipelineProcessor::detect_holes_async(
     }
 }
 
-void PipelineProcessor::fill_holes_async(
-    BoundedQueue<HoleInfo>& hole_queue,
-    std::atomic<bool>& detection_done,
-    std::vector<HoleStatistics>& results,
-    std::mutex& results_mutex)
+void
+PipelineProcessor::fill_holes_async(BoundedQueue<HoleInfo>& hole_queue, std::atomic<bool>& detection_done,
+                                    std::vector<HoleStatistics>& results, std::mutex& results_mutex)
 {
     // Suppress unused parameter warning - detection_done was used for debug output
     (void)detection_done;
@@ -302,7 +296,7 @@ void PipelineProcessor::fill_holes_async(
             // Temporarily disable verbose output during parallel filling
             // to avoid console I/O race conditions
             FillingOptions non_verbose_opts = filling_options_;
-            non_verbose_opts.verbose = false;
+            non_verbose_opts.verbose        = false;
 
             // Create filler for this thread
             HoleFiller filler(mesh_, non_verbose_opts);
@@ -315,12 +309,12 @@ void PipelineProcessor::fill_holes_async(
             // CGAL threw an exception - mesh might be corrupted, but at least unlock
             thread_safe_cerr() << "  [ERROR] Exception during fill_hole: " << e.what() << "\n";
             stats.filled_successfully = false;
-            stats.error_message = std::string("Exception: ") + e.what();
+            stats.error_message       = std::string("Exception: ") + e.what();
         } catch (...) {
             // Unknown exception - likely CGAL internal error
             thread_safe_cerr() << "  [ERROR] Unknown exception during fill_hole\n";
             stats.filled_successfully = false;
-            stats.error_message = "Unknown exception during hole filling";
+            stats.error_message       = "Unknown exception during hole filling";
         }
 
         // Store result (and optionally print with synchronized console access)
@@ -332,11 +326,9 @@ void PipelineProcessor::fill_holes_async(
             // If verbose mode is enabled, print result with thread-safe output
             if (filling_options_.verbose) {
                 if (stats.filled_successfully) {
-                    thread_safe_cout() << "  [Pipeline] Hole filled: "
-                                       << stats.num_faces_added << " faces, "
+                    thread_safe_cout() << "  [Pipeline] Hole filled: " << stats.num_faces_added << " faces, "
                                        << stats.num_vertices_added << " vertices added"
-                                       << (stats.fairing_succeeded ? "" : " [FAIRING FAILED]")
-                                       << "\n";
+                                       << (stats.fairing_succeeded ? "" : " [FAIRING FAILED]") << "\n";
                 } else {
                     // Failure - show error message
                     if (!stats.error_message.empty()) {
@@ -350,7 +342,9 @@ void PipelineProcessor::fill_holes_async(
     }
 }
 
-MeshStatistics PipelineProcessor::process_batch(bool verbose) {
+MeshStatistics
+PipelineProcessor::process_batch(bool verbose)
+{
     // Traditional approach: detect all holes first, then fill
     if (verbose) {
         std::cout << "[Batch] Detecting all holes first...\n";
@@ -362,9 +356,9 @@ MeshStatistics PipelineProcessor::process_batch(bool verbose) {
     if (holes.empty()) {
         MeshStatistics stats;
         stats.original_vertices = mesh_.number_of_vertices();
-        stats.original_faces = mesh_.number_of_faces();
-        stats.final_vertices = stats.original_vertices;
-        stats.final_faces = stats.original_faces;
+        stats.original_faces    = mesh_.number_of_faces();
+        stats.final_vertices    = stats.original_vertices;
+        stats.final_faces       = stats.original_faces;
         return stats;
     }
 
@@ -379,4 +373,4 @@ MeshStatistics PipelineProcessor::process_batch(bool verbose) {
     return filler.fill_all_holes(holes);
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

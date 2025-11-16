@@ -8,11 +8,11 @@ namespace MeshRepair {
 
 SubmeshExtractor::SubmeshExtractor(const Mesh& mesh)
     : mesh_(mesh)
-{}
+{
+}
 
-Submesh SubmeshExtractor::extract(
-    const std::unordered_set<face_descriptor>& faces,
-    const std::vector<HoleInfo>& holes) const
+Submesh
+SubmeshExtractor::extract(const std::unordered_set<face_descriptor>& faces, const std::vector<HoleInfo>& holes) const
 {
     Submesh result;
     result.original_hole_count = holes.size();
@@ -31,15 +31,12 @@ Submesh SubmeshExtractor::extract(
 
     // Mark all faces in our set with ID 1, others with ID 0
     for (auto f : faces) {
-        std::size_t idx = get(face_id_map, f);
+        std::size_t idx         = get(face_id_map, f);
         face_partition_ids[idx] = 1;
     }
 
     // Create an associative property map using the vector
-    auto face_partition_pmap = boost::make_iterator_property_map(
-        face_partition_ids.begin(),
-        face_id_map
-    );
+    auto face_partition_pmap = boost::make_iterator_property_map(face_partition_ids.begin(), face_id_map);
 
     // Create filtered view using the property map
     typedef CGAL::Face_filtered_graph<Mesh> Filtered_graph;
@@ -47,12 +44,9 @@ Submesh SubmeshExtractor::extract(
 
     // Copy filtered graph to new mesh
     // This creates new vertex/face/halfedge descriptors
-    CGAL::copy_face_graph(
-        filtered_mesh,
-        result.mesh,
-        CGAL::parameters::vertex_to_vertex_map(
-            boost::make_assoc_property_map(result.old_to_new_vertex))
-    );
+    CGAL::copy_face_graph(filtered_mesh, result.mesh,
+                          CGAL::parameters::vertex_to_vertex_map(
+                              boost::make_assoc_property_map(result.old_to_new_vertex)));
 
     // Build reverse map (new -> old)
     for (const auto& [old_v, new_v] : result.old_to_new_vertex) {
@@ -64,10 +58,8 @@ Submesh SubmeshExtractor::extract(
         HoleInfo new_hole = old_hole;
 
         // Find corresponding halfedge in new mesh
-        halfedge_descriptor mapped_he = find_mapped_halfedge(
-            old_hole.boundary_halfedge,
-            result.mesh,
-            result.old_to_new_vertex);
+        halfedge_descriptor mapped_he = find_mapped_halfedge(old_hole.boundary_halfedge, result.mesh,
+                                                             result.old_to_new_vertex);
 
         if (mapped_he != Mesh::null_halfedge()) {
             // Verify it's actually a border halfedge in the new mesh
@@ -81,10 +73,10 @@ Submesh SubmeshExtractor::extract(
     return result;
 }
 
-Submesh SubmeshExtractor::extract_partition(
-    const std::vector<size_t>& partition_indices,
-    const std::vector<HoleInfo>& all_holes,
-    const std::vector<HoleWithNeighborhood>& neighborhoods) const
+Submesh
+SubmeshExtractor::extract_partition(const std::vector<size_t>& partition_indices,
+                                    const std::vector<HoleInfo>& all_holes,
+                                    const std::vector<HoleWithNeighborhood>& neighborhoods) const
 {
     // Collect all faces from all holes in this partition
     std::unordered_set<face_descriptor> partition_faces;
@@ -92,9 +84,7 @@ Submesh SubmeshExtractor::extract_partition(
 
     for (size_t idx : partition_indices) {
         // Add faces from neighborhood
-        partition_faces.insert(
-            neighborhoods[idx].n_ring_faces.begin(),
-            neighborhoods[idx].n_ring_faces.end());
+        partition_faces.insert(neighborhoods[idx].n_ring_faces.begin(), neighborhoods[idx].n_ring_faces.end());
 
         // Add hole info
         partition_holes.push_back(all_holes[idx]);
@@ -103,10 +93,9 @@ Submesh SubmeshExtractor::extract_partition(
     return extract(partition_faces, partition_holes);
 }
 
-halfedge_descriptor SubmeshExtractor::find_mapped_halfedge(
-    halfedge_descriptor old_halfedge,
-    const Mesh& new_mesh,
-    const std::map<vertex_descriptor, vertex_descriptor>& vertex_map) const
+halfedge_descriptor
+SubmeshExtractor::find_mapped_halfedge(halfedge_descriptor old_halfedge, const Mesh& new_mesh,
+                                       const std::map<vertex_descriptor, vertex_descriptor>& vertex_map) const
 {
     // Get source and target vertices in old mesh
     vertex_descriptor old_src = source(old_halfedge, mesh_);
@@ -135,4 +124,4 @@ halfedge_descriptor SubmeshExtractor::find_mapped_halfedge(
     return Mesh::null_halfedge();
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

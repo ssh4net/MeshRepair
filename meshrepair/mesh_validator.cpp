@@ -8,19 +8,27 @@ namespace PMP = CGAL::Polygon_mesh_processing;
 
 namespace MeshRepair {
 
-bool MeshValidator::is_valid(const Mesh& mesh) {
+bool
+MeshValidator::is_valid(const Mesh& mesh)
+{
     return mesh.is_valid();
 }
 
-bool MeshValidator::is_triangle_mesh(const Mesh& mesh) {
+bool
+MeshValidator::is_triangle_mesh(const Mesh& mesh)
+{
     return CGAL::is_triangle_mesh(mesh);
 }
 
-bool MeshValidator::is_closed(const Mesh& mesh) {
+bool
+MeshValidator::is_closed(const Mesh& mesh)
+{
     return CGAL::is_closed(mesh);
 }
 
-size_t MeshValidator::count_connected_components(const Mesh& mesh) {
+size_t
+MeshValidator::count_connected_components(const Mesh& mesh)
+{
     // Need non-const mesh for property map operations
     Mesh& non_const_mesh = const_cast<Mesh&>(mesh);
 
@@ -34,7 +42,9 @@ size_t MeshValidator::count_connected_components(const Mesh& mesh) {
     return num_components;
 }
 
-double MeshValidator::get_bbox_diagonal(const Mesh& mesh) {
+double
+MeshValidator::get_bbox_diagonal(const Mesh& mesh)
+{
     if (mesh.number_of_vertices() == 0) {
         return 0.0;
     }
@@ -46,12 +56,14 @@ double MeshValidator::get_bbox_diagonal(const Mesh& mesh) {
         points.push_back(mesh.point(v));
     }
 
-    auto bbox = CGAL::bounding_box(points.begin(), points.end());
+    auto bbox         = CGAL::bounding_box(points.begin(), points.end());
     auto diag_squared = CGAL::squared_distance(bbox.min(), bbox.max());
     return std::sqrt(CGAL::to_double(diag_squared));
 }
 
-void MeshValidator::print_statistics(const Mesh& mesh, bool detailed) {
+void
+MeshValidator::print_statistics(const Mesh& mesh, bool detailed)
+{
     std::cout << "\n=== Mesh Statistics ===\n";
     std::cout << "  Vertices: " << mesh.number_of_vertices() << "\n";
     std::cout << "  Faces: " << mesh.number_of_faces() << "\n";
@@ -83,7 +95,9 @@ void MeshValidator::print_statistics(const Mesh& mesh, bool detailed) {
     std::cout << "=======================\n\n";
 }
 
-std::string MeshValidator::generate_report(const Mesh& mesh) {
+std::string
+MeshValidator::generate_report(const Mesh& mesh)
+{
     std::ostringstream report;
 
     report << "Mesh Validation Report\n";
@@ -114,4 +128,4 @@ std::string MeshValidator::generate_report(const Mesh& mesh) {
     return report.str();
 }
 
-} // namespace MeshRepair
+}  // namespace MeshRepair

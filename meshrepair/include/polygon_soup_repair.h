@@ -9,103 +9,199 @@
 
 namespace MeshRepair {
 
+/// Result of non-manifold polygon removal
+struct NonManifoldRemovalResult {
+    size_t total_polygons_removed = 0;   // Total polygons removed across all iterations
+    size_t iterations_executed = 0;      // Number of iterations performed
+    bool hit_max_iterations = false;     // True if stopped due to max_depth limit
+};
+
 /// Parallel polygon soup repair utilities
 class PolygonSoupRepair {
 public:
-    /// Detect and remove polygons containing non-manifold vertices
+    /// Detect and remove polygons containing non-manifold vertices/edges
     ///
-    /// A non-manifold vertex is a vertex whose incident faces do not form
-    /// a single continuous fan (umbrella) around the vertex.
+    /// Uses recursive local search instead of N global passes:
+    /// 1. Initial pass: Check ALL vertices for non-manifold issues
+    /// 2. Remove polygons containing non-manifold vertices/edges
+    /// 3. Collect "affected vertices" (vertices in removed polygons + neighbors)
+    /// 4. Recursively check only affected vertices until no more issues found
     ///
-    /// Detection algorithm:
-    /// 1. For each vertex, collect all incident polygons
-    /// 2. Build an edge-adjacency graph of these polygons
-    /// 3. Check if the graph forms a single connected component (one umbrella)
-    /// 4. If not → non-manifold vertex → remove all incident polygons
+    /// This is much faster than N global passes because we only check
+    /// the local neighborhood where topology changed.
     ///
     /// @param polygons Polygon soup (each polygon is a vector of vertex indices)
-    /// @return Number of polygons removed
+    /// @param max_depth Maximum recursion depth (default: 10)
+    /// @param verbose Print debug info about passes (default: false)
+    /// @return Detailed result with iteration count and removal statistics
     template<typename PolygonRange>
-    static size_t remove_non_manifold_polygons(PolygonRange& polygons) {
+    static NonManifoldRemovalResult remove_non_manifold_polygons_detailed(
+        PolygonRange& polygons,
+        size_t max_depth = 10,
+        bool verbose = false)
+    {
+        NonManifoldRemovalResult result;
+
         if (polygons.empty()) {
-            return 0;
+            return result;
         }
 
-        // PHASE 1: Build vertex-to-polygons map
         using PolygonID = size_t;
         using VertexID = size_t;
 
-        std::unordered_map<VertexID, std::vector<PolygonID>> vertex_to_polygons;
+        std::unordered_set<VertexID> vertices_to_check;  // Empty = check all
 
-        for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
-            const auto& polygon = polygons[poly_id];
+        // Iterative passes - first pass checks all, subsequent passes check only affected
+        for (size_t pass = 0; pass < max_depth; ++pass) {
+            // PHASE 1: Build vertex-to-polygons map
+            std::unordered_map<VertexID, std::vector<PolygonID>> vertex_to_polygons;
 
-            if (polygon.size() < 3) {
-                continue; // Invalid polygon
+            for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
+                const auto& polygon = polygons[poly_id];
+
+                if (polygon.size() < 3) {
+                    continue; // Invalid polygon
+                }
+
+                for (VertexID v : polygon) {
+                    vertex_to_polygons[v].push_back(poly_id);
+                }
             }
 
-            for (VertexID v : polygon) {
-                vertex_to_polygons[v].push_back(poly_id);
+            // PHASE 2: Detect non-manifold vertices
+            // If first pass (vertices_to_check is empty), check all vertices
+            // Otherwise, only check affected vertices
+            std::unordered_set<PolygonID> polygons_to_remove;
+
+            if (vertices_to_check.empty()) {
+                // First pass - check ALL vertices
+                for (const auto& [vertex, incident_polys] : vertex_to_polygons) {
+                    if (incident_polys.size() < 2) {
+                        continue; // Boundary or isolated vertex
+                    }
+
+                    if (!is_single_umbrella(vertex, incident_polys, polygons)) {
+                        // Non-manifold vertex! Remove all incident polygons
+                        polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
+                    }
+                }
+            } else {
+                // Subsequent passes - check only affected vertices
+                for (VertexID vertex : vertices_to_check) {
+                    auto it = vertex_to_polygons.find(vertex);
+                    if (it == vertex_to_polygons.end()) {
+                        continue; // Vertex no longer exists
+                    }
+
+                    const auto& incident_polys = it->second;
+                    if (incident_polys.size() < 2) {
+                        continue; // Boundary or isolated vertex
+                    }
+
+                    if (!is_single_umbrella(vertex, incident_polys, polygons)) {
+                        // Non-manifold vertex! Remove all incident polygons
+                        polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
+                    }
+                }
+            }
+
+            // PHASE 3: Check for non-manifold edges (edges with > 2 polygons)
+            using Edge = std::pair<size_t, size_t>;
+            std::unordered_map<Edge, std::vector<PolygonID>, EdgeHash> edge_to_polygons;
+
+            for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
+                const auto& polygon = polygons[poly_id];
+                size_t num_verts = polygon.size();
+
+                if (num_verts < 3) {
+                    continue;
+                }
+
+                for (size_t i = 0; i < num_verts; ++i) {
+                    size_t v0 = polygon[i];
+                    size_t v1 = polygon[(i + 1) % num_verts];
+
+                    Edge edge = (v0 < v1) ? Edge{v0, v1} : Edge{v1, v0};
+                    edge_to_polygons[edge].push_back(poly_id);
+                }
+            }
+
+            for (const auto& [edge, incident_polys] : edge_to_polygons) {
+                if (incident_polys.size() > 2) {
+                    // Non-manifold edge!
+                    polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
+                }
+            }
+
+            // No more non-manifold issues found - we're done!
+            if (polygons_to_remove.empty()) {
+                result.iterations_executed = pass + 1;
+                break;
+            }
+
+            // PHASE 4: Collect affected vertices for next pass
+            // These are: vertices in removed polygons + their neighbors
+            vertices_to_check.clear();
+
+            for (PolygonID poly_id : polygons_to_remove) {
+                const auto& polygon = polygons[poly_id];
+
+                // Add all vertices from this polygon
+                for (VertexID v : polygon) {
+                    vertices_to_check.insert(v);
+                }
+
+                // Add vertices from neighboring polygons (polygons sharing edges)
+                for (size_t i = 0; i < polygon.size(); ++i) {
+                    size_t v0 = polygon[i];
+                    size_t v1 = polygon[(i + 1) % polygon.size()];
+                    Edge edge = (v0 < v1) ? Edge{v0, v1} : Edge{v1, v0};
+
+                    auto it = edge_to_polygons.find(edge);
+                    if (it != edge_to_polygons.end()) {
+                        for (PolygonID neighbor_poly_id : it->second) {
+                            if (neighbor_poly_id != poly_id && neighbor_poly_id < polygons.size()) {
+                                const auto& neighbor_polygon = polygons[neighbor_poly_id];
+                                for (VertexID neighbor_v : neighbor_polygon) {
+                                    vertices_to_check.insert(neighbor_v);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // PHASE 5: Remove marked polygons
+            auto new_end = std::remove_if(polygons.begin(), polygons.end(),
+                [&polygons_to_remove, poly_id = size_t(0)](const auto& polygon) mutable {
+                    (void)polygon;  // Unused - we only need the index via poly_id
+                    return polygons_to_remove.find(poly_id++) != polygons_to_remove.end();
+                });
+
+            size_t removed_this_pass = std::distance(new_end, polygons.end());
+            polygons.erase(new_end, polygons.end());
+            result.total_polygons_removed += removed_this_pass;
+
+            // If we hit max depth, warn and stop
+            if (pass == max_depth - 1) {
+                result.iterations_executed = max_depth;
+                result.hit_max_iterations = true;
+                break;
             }
         }
 
-        // PHASE 2: Detect non-manifold vertices
-        std::unordered_set<PolygonID> polygons_to_remove;
+        return result;
+    }
 
-        for (const auto& [vertex, incident_polys] : vertex_to_polygons) {
-            if (incident_polys.size() < 2) {
-                continue; // Boundary or isolated vertex, not non-manifold
-            }
-
-            // Check if incident polygons form a single umbrella (fan)
-            if (!is_single_umbrella(vertex, incident_polys, polygons)) {
-                // Non-manifold vertex! Remove all incident polygons
-                polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
-            }
-        }
-
-        // PHASE 3: Also check for non-manifold edges (edges with > 2 polygons)
-        using Edge = std::pair<size_t, size_t>;
-        std::unordered_map<Edge, std::vector<PolygonID>, EdgeHash> edge_to_polygons;
-
-        for (size_t poly_id = 0; poly_id < polygons.size(); ++poly_id) {
-            const auto& polygon = polygons[poly_id];
-            size_t num_verts = polygon.size();
-
-            if (num_verts < 3) {
-                continue;
-            }
-
-            for (size_t i = 0; i < num_verts; ++i) {
-                size_t v0 = polygon[i];
-                size_t v1 = polygon[(i + 1) % num_verts];
-
-                Edge edge = (v0 < v1) ? Edge{v0, v1} : Edge{v1, v0};
-                edge_to_polygons[edge].push_back(poly_id);
-            }
-        }
-
-        for (const auto& [edge, incident_polys] : edge_to_polygons) {
-            if (incident_polys.size() > 2) {
-                // Non-manifold edge!
-                polygons_to_remove.insert(incident_polys.begin(), incident_polys.end());
-            }
-        }
-
-        if (polygons_to_remove.empty()) {
-            return 0;
-        }
-
-        // PHASE 4: Remove marked polygons
-        auto new_end = std::remove_if(polygons.begin(), polygons.end(),
-            [&polygons_to_remove, poly_id = size_t(0)](const auto& polygon) mutable {
-                return polygons_to_remove.find(poly_id++) != polygons_to_remove.end();
-            });
-
-        size_t num_removed = std::distance(new_end, polygons.end());
-        polygons.erase(new_end, polygons.end());
-
-        return num_removed;
+    /// Legacy interface - returns only polygon count (for backward compatibility)
+    template<typename PolygonRange>
+    static size_t remove_non_manifold_polygons(
+        PolygonRange& polygons,
+        size_t max_depth = 10,
+        bool verbose = false)
+    {
+        auto result = remove_non_manifold_polygons_detailed(polygons, max_depth, verbose);
+        return result.total_polygons_removed;
     }
 
 private:

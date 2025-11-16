@@ -9,11 +9,10 @@
 set(RapidOBJ_SEARCH_PATHS
     ${RapidOBJ_INCLUDE_DIR}
     ${CMAKE_PREFIX_PATH}/include
-    /mnt/e/UBS/include
-    e:/UBS/include
     /usr/local/include
     /usr/include
     /opt/local/include
+    /opt/homebrew/include
     $ENV{RapidOBJ_INCLUDE_DIR}
 )
 

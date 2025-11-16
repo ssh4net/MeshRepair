@@ -9,11 +9,11 @@ namespace MeshRepair {
  * @brief Information about a detected hole in the mesh
  */
 struct HoleInfo {
-    halfedge_descriptor boundary_halfedge;      // Starting halfedge on hole boundary
+    halfedge_descriptor boundary_halfedge;  // Starting halfedge on hole boundary
     std::vector<vertex_descriptor> boundary_vertices;
-    size_t boundary_size = 0;
+    size_t boundary_size      = 0;
     double estimated_diameter = 0.0;
-    double estimated_area = 0.0;
+    double estimated_area     = 0.0;
 };
 
 /**
@@ -65,4 +65,4 @@ private:
     bool verbose_;
 };
 
-} // namespace MeshRepair
+}  // namespace MeshRepair
