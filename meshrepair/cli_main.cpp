@@ -9,11 +9,16 @@
 #include "parallel_hole_filler.h"
 #include "config.h"
 
+#include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
+#include <CGAL/IO/PLY.h>
 #include <iostream>
 #include <string>
 #include <cstring>
+#include <chrono>
 
 using namespace MeshRepair;
+
+namespace PMP = CGAL::Polygon_mesh_processing;
 
 
 void
@@ -216,28 +221,32 @@ cli_main(int argc, char** argv)
         return (argc < 3) ? 1 : 0;  // Return 0 for --help, 1 for parse error
     }
 
+    // Start total timing
+    auto program_start_time = std::chrono::high_resolution_clock::now();
+
     if (!args.quiet) {
         std::cout << "=== MeshHoleFiller v" << Config::VERSION << " ===\n\n";
     }
 
-    // Step 1: Load mesh
+    // Step 1: Load mesh as polygon soup (optimized - avoids mesh construction)
     if (!args.quiet && args.filling_options.verbose) {
         std::cout << "Loading mesh from: " << args.input_file << "\n";
     }
 
-    auto mesh_opt = MeshLoader::load(args.input_file, MeshLoader::Format::AUTO, args.force_cgal_loader);
-    if (!mesh_opt) {
+    auto soup_opt = MeshLoader::load_as_soup(args.input_file, MeshLoader::Format::AUTO, args.force_cgal_loader);
+    if (!soup_opt) {
         std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
         return 1;
     }
 
-    Mesh mesh = std::move(mesh_opt.value());
+    PolygonSoup soup = std::move(soup_opt.value());
+    Mesh mesh;  // Will be populated during preprocessing or immediately if no preprocessing
 
     if (!args.quiet && args.filling_options.verbose) {
-        std::cout << "Loaded mesh from: " << args.input_file << "\n";
-        std::cout << "  Vertices: " << mesh.number_of_vertices() << "\n";
-        std::cout << "  Faces: " << mesh.number_of_faces() << "\n";
-        std::cout << "  Edges: " << mesh.number_of_edges() << "\n\n";
+        std::cout << "Loaded polygon soup from: " << args.input_file << "\n";
+        std::cout << "  Points: " << soup.points.size() << "\n";
+        std::cout << "  Polygons: " << soup.polygons.size() << "\n";
+        std::cout << "  Load time: " << std::fixed << std::setprecision(2) << soup.load_time_ms << " ms\n\n";
     }
 
     // Configure threading
@@ -248,33 +257,21 @@ cli_main(int argc, char** argv)
 
     ThreadManager thread_manager(thread_config);
 
-    // Validate input mesh if requested
-    if (args.validate) {
-        if (!args.quiet) {
-            std::cout << "\n=== Input Mesh Validation ===\n";
-        }
-        MeshValidator::print_statistics(mesh, true);
+    // Step 1.5: Preprocess soup and convert to mesh (OPTIMIZED - single conversion!)
+    PreprocessingStats prep_stats;
 
-        if (!MeshValidator::is_valid(mesh)) {
-            std::cout << "Warning: Input mesh failed validity checks\n";
-        }
-
-        if (!MeshValidator::is_triangle_mesh(mesh)) {
-            std::cout << "Error: Mesh must be a triangle mesh\n";
-            return 1;
-        }
-    }
-
-    // Step 1.5: Preprocess mesh if requested
     if (args.enable_preprocessing) {
-        // Debug: Save original loaded mesh before any preprocessing
+        // Debug: Save original loaded soup before any preprocessing
         if (args.debug) {
             std::string debug_file = "debug_00_original_loaded.ply";
-            if (CGAL::IO::write_PLY(debug_file, mesh, CGAL::parameters::use_binary_mode(true))) {
+            // Convert soup to temporary mesh for debug output
+            Mesh debug_mesh;
+            PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);
+            if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
                 if (!args.quiet) {
-                    std::cout << "  [DEBUG] Saved original loaded mesh: " << debug_file << "\n";
-                    std::cout << "  [DEBUG]   Vertices: " << mesh.number_of_vertices() << "\n";
-                    std::cout << "  [DEBUG]   Faces: " << mesh.number_of_faces() << "\n\n";
+                    std::cout << "  [DEBUG] Saved original loaded soup: " << debug_file << "\n";
+                    std::cout << "  [DEBUG]   Points: " << soup.points.size() << "\n";
+                    std::cout << "  [DEBUG]   Polygons: " << soup.polygons.size() << "\n\n";
                 }
             }
         }
@@ -289,11 +286,54 @@ cli_main(int argc, char** argv)
         prep_opts.verbose                = args.filling_options.verbose;
         prep_opts.debug                  = args.debug;
 
-        MeshPreprocessor preprocessor(mesh, prep_opts);
-        auto prep_stats = preprocessor.preprocess();
+        // Preprocess soup directly (no mesh->soup extraction!)
+        prep_stats = MeshPreprocessor::preprocess_soup(soup, mesh, prep_opts);
 
-        if (args.show_stats) {
-            preprocessor.print_report();
+        if (args.show_stats && args.filling_options.verbose) {
+            std::cout << "\n=== Preprocessing Report ===\n";
+            std::cout << "Duplicate vertices merged: " << prep_stats.duplicates_merged << "\n";
+            std::cout << "Non-manifold polygons removed: " << prep_stats.non_manifold_vertices_removed << "\n";
+            std::cout << "3-face fans collapsed: " << prep_stats.face_fans_collapsed << "\n";
+            std::cout << "Isolated vertices removed: " << prep_stats.isolated_vertices_removed << "\n";
+            std::cout << "Connected components found: " << prep_stats.connected_components_found << "\n";
+            std::cout << "Small components removed: " << prep_stats.small_components_removed << "\n";
+            std::cout << "Timing breakdown:\n";
+            std::cout << "  Soup cleanup: " << std::fixed << std::setprecision(2) << prep_stats.soup_cleanup_time_ms << " ms\n";
+            std::cout << "  Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n";
+            std::cout << "  Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n";
+            std::cout << "  Total: " << prep_stats.total_time_ms << " ms\n";
+            std::cout << "============================\n\n";
+        }
+    } else {
+        // No preprocessing - just convert soup to mesh directly
+        auto convert_start = std::chrono::high_resolution_clock::now();
+        PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, mesh);
+        auto convert_end = std::chrono::high_resolution_clock::now();
+
+        double convert_time_ms = std::chrono::duration<double, std::milli>(convert_end - convert_start).count();
+
+        if (!args.quiet && args.filling_options.verbose) {
+            std::cout << "Converted soup to mesh (no preprocessing)\n";
+            std::cout << "  Vertices: " << mesh.number_of_vertices() << "\n";
+            std::cout << "  Faces: " << mesh.number_of_faces() << "\n";
+            std::cout << "  Conversion time: " << std::fixed << std::setprecision(2) << convert_time_ms << " ms\n\n";
+        }
+    }
+
+    // Validate mesh if requested (after conversion to mesh)
+    if (args.validate) {
+        if (!args.quiet) {
+            std::cout << "\n=== Input Mesh Validation ===\n";
+        }
+        MeshValidator::print_statistics(mesh, true);
+
+        if (!MeshValidator::is_valid(mesh)) {
+            std::cout << "Warning: Input mesh failed validity checks\n";
+        }
+
+        if (!MeshValidator::is_triangle_mesh(mesh)) {
+            std::cout << "Error: Mesh must be a triangle mesh\n";
+            return 1;
         }
     }
 
@@ -368,11 +408,14 @@ cli_main(int argc, char** argv)
     }
 
     // Binary PLY by default, ASCII if requested
+    auto save_start_time = std::chrono::high_resolution_clock::now();
     bool use_binary_ply = !args.ascii_ply;
     if (!MeshLoader::save(mesh, args.output_file, MeshLoader::Format::AUTO, use_binary_ply)) {
         std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
         return 1;
     }
+    auto save_end_time = std::chrono::high_resolution_clock::now();
+    double save_time_ms = std::chrono::duration<double, std::milli>(save_end_time - save_start_time).count();
 
     // Step 6: Print detailed statistics if requested
     if (args.show_stats) {
@@ -391,8 +434,21 @@ cli_main(int argc, char** argv)
         std::cout << "  Failed: " << stats.num_holes_failed << "\n";
         std::cout << "  Skipped: " << stats.num_holes_skipped << "\n";
 
-        std::cout << "\nTiming:\n";
-        std::cout << "  Total: " << stats.total_time_ms << " ms\n";
+        std::cout << "\nTiming breakdown:\n";
+        std::cout << "  File load: " << std::fixed << std::setprecision(2) << soup.load_time_ms << " ms\n";
+        if (args.enable_preprocessing) {
+            std::cout << "  Preprocessing:\n";
+            std::cout << "    Soup cleanup: " << prep_stats.soup_cleanup_time_ms << " ms\n";
+            std::cout << "    Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n";
+            std::cout << "    Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n";
+            std::cout << "    Subtotal: " << prep_stats.total_time_ms << " ms\n";
+        }
+        std::cout << "  Hole filling: " << stats.total_time_ms << " ms\n";
+        std::cout << "  File save: " << save_time_ms << " ms\n";
+
+        auto program_end_time = std::chrono::high_resolution_clock::now();
+        double total_program_time_ms = std::chrono::duration<double, std::milli>(program_end_time - program_start_time).count();
+        std::cout << "  Total program time: " << total_program_time_ms << " ms\n";
 
         if (args.filling_options.verbose && !stats.hole_details.empty()) {
             std::cout << "\nPer-hole details:\n";

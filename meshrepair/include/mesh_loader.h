@@ -3,8 +3,16 @@
 #include "types.h"
 #include <string>
 #include <optional>
+#include <vector>
 
 namespace MeshRepair {
+
+// Polygon soup structure (points + polygons)
+struct PolygonSoup {
+    std::vector<Point_3> points;
+    std::vector<std::vector<std::size_t>> polygons;
+    double load_time_ms = 0.0;  // Time to load from file
+};
 
 /**
  * @brief Mesh I/O handler for OBJ and PLY formats
@@ -22,7 +30,7 @@ public:
     };
 
     /**
-     * @brief Load mesh from file
+     * @brief Load mesh from file (DEPRECATED - loads as mesh then converts to soup in preprocessing)
      * @param filename Path to mesh file
      * @param format File format (AUTO for auto-detection)
      * @param force_cgal_loader Force CGAL OBJ loader instead of RapidOBJ (default: false)
@@ -30,6 +38,16 @@ public:
      */
     static std::optional<Mesh> load(const std::string& filename, Format format = Format::AUTO,
                                     bool force_cgal_loader = false);
+
+    /**
+     * @brief Load file directly as polygon soup (RECOMMENDED - avoids mesh→soup conversion)
+     * @param filename Path to mesh file
+     * @param format File format (AUTO for auto-detection)
+     * @param force_cgal_loader Force CGAL OBJ loader instead of RapidOBJ (default: false)
+     * @return Polygon soup on success, std::nullopt on failure
+     */
+    static std::optional<PolygonSoup> load_as_soup(const std::string& filename, Format format = Format::AUTO,
+                                                    bool force_cgal_loader = false);
 
     /**
      * @brief Save mesh to file
@@ -66,6 +84,13 @@ private:
      * @return Loaded mesh on success, std::nullopt on failure
      */
     static std::optional<Mesh> load_obj_rapidobj(const std::string& filename);
+
+    /**
+     * @brief Load OBJ file as polygon soup using RapidOBJ parser
+     * @param filename Path to OBJ file
+     * @return Polygon soup on success, std::nullopt on failure
+     */
+    static std::optional<PolygonSoup> load_obj_rapidobj_as_soup(const std::string& filename);
 #endif
 };
 

@@ -3,11 +3,13 @@
 
 #include "types.h"
 #include <string>
+#include <vector>
 
 namespace MeshRepair {
 
 // Forward declaration
 class ThreadPool;
+struct PolygonSoup;  // Forward declaration from mesh_loader.h
 
 struct PreprocessingStats {
     size_t duplicates_merged             = 0;
@@ -17,6 +19,11 @@ struct PreprocessingStats {
     size_t connected_components_found    = 0;  // Number of connected components found
     size_t small_components_removed      = 0;  // Number of small components removed
     double total_time_ms                 = 0.0;
+
+    // Detailed timing breakdown
+    double soup_cleanup_time_ms     = 0.0;  // Time in soup space (duplicates, non-manifold, etc.)
+    double soup_to_mesh_time_ms     = 0.0;  // Time converting soup to mesh
+    double mesh_cleanup_time_ms     = 0.0;  // Time in mesh space (isolated vertices, components)
 
     bool has_changes() const
     {
@@ -40,8 +47,13 @@ class MeshPreprocessor {
 public:
     MeshPreprocessor(Mesh& mesh, const PreprocessingOptions& options = PreprocessingOptions());
 
-    // Run all enabled preprocessing steps
+    // Run all enabled preprocessing steps (OLD API - converts mesh to soup internally)
     PreprocessingStats preprocess();
+
+    // Run preprocessing on polygon soup directly (RECOMMENDED - avoids mesh->soup extraction)
+    // Takes soup as input, modifies in place, converts to mesh at end
+    static PreprocessingStats preprocess_soup(PolygonSoup& soup, Mesh& output_mesh,
+                                               const PreprocessingOptions& options = PreprocessingOptions());
 
     // Individual preprocessing operations (mesh-level only)
     size_t remove_isolated_vertices();

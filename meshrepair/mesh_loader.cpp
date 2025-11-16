@@ -3,6 +3,7 @@
 #include <CGAL/IO/PLY.h>
 #include <CGAL/IO/OBJ.h>
 #include <CGAL/IO/OFF.h>
+#include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -151,7 +152,153 @@ MeshLoader::load_obj_rapidobj(const std::string& filename)
 
     return mesh;
 }
+
+std::optional<PolygonSoup>
+MeshLoader::load_obj_rapidobj_as_soup(const std::string& filename)
+{
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    // Parse OBJ with RapidOBJ
+    auto result = rapidobj::ParseFile(filename, rapidobj::MaterialLibrary::Ignore());
+
+    if (result.error) {
+        last_error_ = "RapidOBJ parse error: " + result.error.code.message() + " at line "
+                      + std::to_string(result.error.line_num);
+        return std::nullopt;
+    }
+
+    // Triangulate
+    if (!rapidobj::Triangulate(result)) {
+        last_error_ = "RapidOBJ triangulation failed";
+        return std::nullopt;
+    }
+
+    // Build polygon soup directly (no mesh conversion!)
+    PolygonSoup soup;
+
+    // Extract points
+    const auto& positions = result.attributes.positions;
+    size_t num_vertices = positions.size() / 3;
+    soup.points.reserve(num_vertices);
+
+    for (size_t i = 0; i < num_vertices; ++i) {
+        size_t idx = i * 3;
+        soup.points.emplace_back(
+            static_cast<double>(positions[idx + 0]),
+            static_cast<double>(positions[idx + 1]),
+            static_cast<double>(positions[idx + 2])
+        );
+    }
+
+    // Extract polygons
+    size_t num_faces = 0;
+    for (const auto& shape : result.shapes) {
+        num_faces += shape.mesh.num_face_vertices.size();
+    }
+    soup.polygons.reserve(num_faces);
+
+    for (const auto& shape : result.shapes) {
+        const auto& shape_mesh = shape.mesh;
+        size_t idx = 0;
+
+        for (size_t f = 0; f < shape_mesh.num_face_vertices.size(); ++f) {
+            uint8_t num_verts = shape_mesh.num_face_vertices[f];
+
+            if (num_verts == 3) {
+                std::vector<std::size_t> polygon;
+                polygon.reserve(3);
+                polygon.push_back(shape_mesh.indices[idx + 0].position_index);
+                polygon.push_back(shape_mesh.indices[idx + 1].position_index);
+                polygon.push_back(shape_mesh.indices[idx + 2].position_index);
+                soup.polygons.push_back(std::move(polygon));
+            }
+
+            idx += num_verts;
+        }
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+    std::cout << "Loaded polygon soup from: " << filename << " (RapidOBJ)\n"
+              << "  Points: " << soup.points.size() << "\n"
+              << "  Polygons: " << soup.polygons.size() << "\n"
+              << "  Load time: " << soup.load_time_ms << " ms\n";
+
+    return soup;
+}
 #endif  // HAVE_RAPIDOBJ
+
+std::optional<PolygonSoup>
+MeshLoader::load_as_soup(const std::string& filename, Format format, bool force_cgal_loader)
+{
+    last_error_.clear();
+
+    // Check file exists
+    if (!validate_input_file(filename)) {
+        last_error_ = "File not found or not readable: " + filename;
+        return std::nullopt;
+    }
+
+    // Auto-detect format if needed
+    if (format == Format::AUTO) {
+        format = detect_format(filename);
+    }
+
+#ifdef HAVE_RAPIDOBJ
+    // Use RapidOBJ for OBJ files (10-50x faster than CGAL parser)
+    if (format == Format::OBJ && !force_cgal_loader) {
+        return load_obj_rapidobj_as_soup(filename);
+    }
+#endif
+
+    // Use CGAL's polygon soup readers for PLY, OBJ, OFF
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    PolygonSoup soup;
+    bool success = false;
+
+    if (format == Format::PLY) {
+        success = CGAL::IO::read_PLY(filename, soup.points, soup.polygons);
+    } else if (format == Format::OBJ) {
+        success = CGAL::IO::read_OBJ(filename, soup.points, soup.polygons);
+    } else if (format == Format::OFF) {
+        success = CGAL::IO::read_OFF(filename, soup.points, soup.polygons);
+    } else {
+        last_error_ = "Unsupported format for soup loading";
+        return std::nullopt;
+    }
+
+    if (!success) {
+        last_error_ = "Failed to parse polygon soup from file: " + filename;
+        return std::nullopt;
+    }
+
+    // Validate
+    if (soup.points.empty()) {
+        last_error_ = "Polygon soup has no points";
+        return std::nullopt;
+    }
+
+    if (soup.polygons.empty()) {
+        last_error_ = "Polygon soup has no polygons";
+        return std::nullopt;
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+    std::cout << "Loaded polygon soup from: " << filename;
+    if (format == Format::OBJ) {
+        std::cout << " (CGAL OBJ parser)";
+    }
+    std::cout << "\n"
+              << "  Points: " << soup.points.size() << "\n"
+              << "  Polygons: " << soup.polygons.size() << "\n"
+              << "  Load time: " << soup.load_time_ms << " ms\n";
+
+    return soup;
+}
 
 std::optional<Mesh>
 MeshLoader::load(const std::string& filename, Format format, bool force_cgal_loader)
