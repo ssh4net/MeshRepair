@@ -336,31 +336,35 @@ public:
             }
             if (!all_triangles) continue;
 
-            // Collect boundary vertices (vertices not equal to center_v)
-            std::vector<VertexID> boundary_verts;
-            boundary_verts.reserve(6);  // 3 triangles, each has 2 boundary verts
+            // Collect boundary vertices in CORRECT WINDING ORDER
+            // We need to preserve orientation, so extract ordered boundary loop
+
+            // First, get all boundary vertices (6 total, 3 unique)
+            std::vector<VertexID> all_boundary_verts;
+            all_boundary_verts.reserve(6);
 
             for (size_t i = 0; i < 3; ++i) {
                 const auto& tri = polygons[incident_polys[i]];
                 for (VertexID v : tri) {
                     if (v != center_v) {
-                        boundary_verts.push_back(v);
+                        all_boundary_verts.push_back(v);
                     }
                 }
             }
 
             // Count unique boundary vertices
-            std::sort(boundary_verts.begin(), boundary_verts.end());
-            auto last = std::unique(boundary_verts.begin(), boundary_verts.end());
-            boundary_verts.erase(last, boundary_verts.end());
+            std::vector<VertexID> unique_boundary = all_boundary_verts;
+            std::sort(unique_boundary.begin(), unique_boundary.end());
+            auto last = std::unique(unique_boundary.begin(), unique_boundary.end());
+            unique_boundary.erase(last, unique_boundary.end());
 
             // Must have exactly 3 unique boundary vertices (forming outer triangle)
-            if (boundary_verts.size() != 3) continue;
+            if (unique_boundary.size() != 3) continue;
 
             // Verify this forms a valid fan by checking edge connectivity
             // Each boundary vertex should appear in exactly 2 of the 3 triangles
             bool valid_fan = true;
-            for (VertexID bv : boundary_verts) {
+            for (VertexID bv : unique_boundary) {
                 size_t appearances = 0;
                 for (size_t i = 0; i < 3; ++i) {
                     const auto& tri = polygons[incident_polys[i]];
@@ -385,12 +389,46 @@ public:
             // Mark center vertex for removal
             vertex_to_remove[center_v] = true;
 
-            // Create replacement triangle from boundary vertices
+            // Create replacement triangle with CORRECT WINDING ORDER
+            // Extract boundary edge loop from first triangle to preserve orientation
+            std::vector<size_t> boundary_ordered;
+            boundary_ordered.reserve(3);
+
+            // Start with first triangle and extract boundary vertices in order
+            const auto& first_tri = polygons[incident_polys[0]];
+            for (size_t j = 0; j < 3; ++j) {
+                if (first_tri[j] != center_v) {
+                    VertexID v1 = first_tri[j];
+                    VertexID v2 = first_tri[(j + 1) % 3];
+
+                    // If this edge is on the boundary (not shared with center)
+                    if (v2 != center_v) {
+                        // Found boundary edge: v1 -> v2
+                        boundary_ordered.push_back(v1);
+                        boundary_ordered.push_back(v2);
+
+                        // Find the third boundary vertex (not v1, not v2, not center)
+                        for (VertexID v : unique_boundary) {
+                            if (v != v1 && v != v2) {
+                                boundary_ordered.push_back(v);
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: if ordered extraction failed, use sorted (preserves old behavior)
+            if (boundary_ordered.size() != 3) {
+                boundary_ordered = unique_boundary;
+            }
+
             std::vector<size_t> new_tri;
             new_tri.reserve(3);
-            new_tri.push_back(boundary_verts[0]);
-            new_tri.push_back(boundary_verts[1]);
-            new_tri.push_back(boundary_verts[2]);
+            new_tri.push_back(boundary_ordered[0]);
+            new_tri.push_back(boundary_ordered[1]);
+            new_tri.push_back(boundary_ordered[2]);
             new_triangles.push_back(std::move(new_tri));
 
             fans_found++;
