@@ -323,8 +323,7 @@ MeshPreprocessor::preprocess()
 }
 
 // ============================================================================
-// OBSOLETE FUNCTIONS (kept for reference, not called anymore)
-// All duplicate/non-manifold removal now happens in soup space in preprocess()
+// Mesh-level helper functions (used by old preprocess() API)
 // ============================================================================
 
 size_t

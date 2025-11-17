@@ -230,8 +230,7 @@ ParallelHoleFillerPipeline::fill_submesh_holes(Submesh submesh, const FillingOpt
 
     for (const auto& hole : submesh.holes) {
         HoleStatistics stats = filler.fill_hole(hole);
-        // TODO: Store statistics if needed
-        (void)stats;  // Suppress unused warning for now
+        (void)stats;  // Statistics not aggregated in worker threads (intentional)
     }
 
     return submesh;  // Return by value (move semantics)
