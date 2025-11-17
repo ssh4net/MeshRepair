@@ -473,10 +473,30 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
         std::cout << "  Removed: " << (before_degenerate - soup.polygons.size()) << " degenerate polygons\n\n";
     }
 
+    // Debug: Save mesh after removal
+    if (options.debug)
+        MeshPreprocessor::plyDump(soup, "debug_02_after_removal.ply", "Saved soup (after degenerate removal)");
+
+    // Step 1.5: Remove 3-face fans
+    if (options.remove_3_face_fans) {
+        if (options.verbose) {
+            std::cout << "[3/6] Collapsing 3-face fans...\n";
+        }
+        size_t fans_collapsed = PolygonSoupRepair::remove_3_face_fans(soup.points, soup.polygons);
+        stats.face_fans_collapsed = fans_collapsed;
+        if (options.verbose) {
+            std::cout << "  Collapsed: " << fans_collapsed << " 3-face fan(s)\n\n";
+        }
+    }
+
+    // Debug: Save mesh after fan removal
+    if (options.debug)
+        MeshPreprocessor::plyDump(soup, "debug_03_after_3_face_fans.ply", "Saved soup (after 3-face fans)");
+
     // Step 1.4: Remove non-manifold vertices/edges
     if (options.remove_non_manifold) {
         if (options.verbose) {
-            std::cout << "[3/6] Removing non-manifold vertices/edges (recursive local search)...\n";
+            std::cout << "[4/6] Removing non-manifold vertices/edges (recursive local search)...\n";
         }
         size_t max_depth = (options.non_manifold_passes > 0) ? options.non_manifold_passes : 10;
         auto nm_result = PolygonSoupRepair::remove_non_manifold_polygons_detailed(soup.polygons, max_depth, options.debug);
@@ -491,17 +511,10 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
         }
     }
 
-    // Step 1.5: Remove 3-face fans
-    if (options.remove_3_face_fans) {
-        if (options.verbose) {
-            std::cout << "[4/6] Collapsing 3-face fans...\n";
-        }
-        size_t fans_collapsed = PolygonSoupRepair::remove_3_face_fans(soup.points, soup.polygons);
-        stats.face_fans_collapsed = fans_collapsed;
-        if (options.verbose) {
-            std::cout << "  Collapsed: " << fans_collapsed << " 3-face fan(s)\n\n";
-        }
-    }
+    // Debug: Save mesh after non-manifold removal
+    if (options.debug)
+        MeshPreprocessor::plyDump(soup, "debug_04_after_non_manifold_removal.ply",
+                                  "Saved soup (after non-manifold removal)");
 
     // Step 1.6: Orient polygon soup
     if (options.verbose) {
@@ -643,6 +656,18 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     }
 
     return stats;
+}
+
+void
+MeshPreprocessor::plyDump(MeshRepair::PolygonSoup& soup, const std::string debug_file, const std::string message)
+{
+    Mesh debug_mesh;
+    PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);
+    if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL ::parameters::use_binary_mode(true))) {
+        std::cout << "  [DEBUG] " << message << " : " << debug_file << "\n ";
+        std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
+                  << debug_mesh.number_of_faces() << " faces\n";
+    }
 }
 
 }  // namespace MeshRepair

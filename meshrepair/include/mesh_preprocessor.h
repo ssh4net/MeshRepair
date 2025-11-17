@@ -53,7 +53,9 @@ public:
     // Run preprocessing on polygon soup directly (RECOMMENDED - avoids mesh->soup extraction)
     // Takes soup as input, modifies in place, converts to mesh at end
     static PreprocessingStats preprocess_soup(PolygonSoup& soup, Mesh& output_mesh,
-                                               const PreprocessingOptions& options = PreprocessingOptions());
+                                              const PreprocessingOptions& options = PreprocessingOptions());
+
+    static void plyDump(MeshRepair::PolygonSoup& soup, const std::string debug_file, const std::string message);
 
     // Individual preprocessing operations (mesh-level only)
     size_t remove_isolated_vertices();
