@@ -26,6 +26,7 @@ print_usage(const char* program_name)
 {
     std::cout << "\n"
               << "MeshRepair v" << Config::VERSION << "\n"
+              << "Built: " << Config::BUILD_DATE << " " << Config::BUILD_TIME << "\n"
               << "Mesh hole filling tool (Liepa 2003 with Laplacian fairing)\n\n"
               << "Usage: " << program_name << " <input> <output> [options]\n\n"
               << "\n"
@@ -61,9 +62,12 @@ print_usage(const char* program_name)
               << "  --no-3d-delaunay       Disable 3D Delaunay fallback\n"
               << "  --skip-cubic           Skip cubic search (faster but less robust)\n"
               << "  --no-refine            Disable mesh refinement\n"
-              << "  -v, --verbose          Verbose output (shows all hole details)\n"
-              << "  --quiet                Minimal output\n"
-              << "  --stats                Show detailed statistics\n"
+              << "  -v, --verbose <level>  Verbosity level (default: 1)\n"
+              << "                         0 = quiet (minimal output)\n"
+              << "                         1 = info (timing statistics)\n"
+              << "                         2 = verbose (detailed progress)\n"
+              << "                         3 = debug (verbose + debug logging)\n"
+              << "                         4 = trace (debug + PLY file dumps)\n"
               << "  --validate             Validate mesh before/after\n"
               << "  --ascii-ply            Save PLY in ASCII format (default: binary)\n"
               << "\n"
@@ -75,7 +79,6 @@ print_usage(const char* program_name)
               << "  --no-remove-isolated   Disable isolated vertex removal\n"
               << "  --no-remove-small      Disable small component removal\n"
               << "  --non-manifold-passes <n> Number of non-manifold removal passes (default: 2)\n"
-              << "  --debug                Dump intermediate meshes as binary PLY\n"
               << "\n"
               << "Threading:\n"
               << "  --threads <n>          Number of worker threads (default: hw_cores/2, 0 = auto)\n"
@@ -96,9 +99,8 @@ struct CommandLineArgs {
     std::string input_file;
     std::string output_file;
     FillingOptions filling_options;
-    bool show_stats = false;
+    int verbosity   = 1;       // 0=quiet, 1=info(stats), 2=verbose, 3=debug, 4=trace(PLY dumps)
     bool validate   = false;
-    bool quiet      = false;
     bool ascii_ply  = false;  // Use ASCII PLY instead of binary
 
     // Preprocessing options
@@ -109,7 +111,6 @@ struct CommandLineArgs {
     bool preprocess_remove_isolated        = true;
     bool preprocess_keep_largest_component = true;
     size_t non_manifold_passes             = 10;
-    bool debug                             = false;
 
     // Threading options
     size_t num_threads   = 0;     // 0 = auto (hw_cores / 2)
@@ -158,13 +159,16 @@ struct CommandLineArgs {
             } else if (arg == "--no-refine") {
                 filling_options.refine = false;
             } else if (arg == "--verbose" || arg == "-v") {
-                filling_options.verbose = true;
-            } else if (arg == "--quiet") {
-                quiet                         = true;
-                filling_options.show_progress = false;
-                filling_options.verbose       = false;
-            } else if (arg == "--stats") {
-                show_stats = true;
+                // Check if next arg is a number
+                if (i + 1 < argc && argv[i + 1][0] != '-') {
+                    verbosity = std::stoi(argv[++i]);
+                    if (verbosity < 0 || verbosity > 4) {
+                        std::cout << "Error: Verbosity level must be 0-4\n";
+                        return false;
+                    }
+                } else {
+                    verbosity = 2;  // Default to verbose if no level specified
+                }
             } else if (arg == "--validate") {
                 validate = true;
             } else if (arg == "--ascii-ply") {
@@ -187,8 +191,6 @@ struct CommandLineArgs {
                     std::cout << "Error: Non-manifold passes must be at least 1\n";
                     return false;
                 }
-            } else if (arg == "--debug") {
-                debug = true;
             } else if (arg == "--threads" && i + 1 < argc) {
                 num_threads = std::stoul(argv[++i]);
             } else if (arg == "--queue-size" && i + 1 < argc) {
@@ -224,12 +226,21 @@ cli_main(int argc, char** argv)
     // Start total timing
     auto program_start_time = std::chrono::high_resolution_clock::now();
 
-    if (!args.quiet) {
+    // Set flags based on verbosity level
+    // 0 = quiet, 1 = info (stats), 2 = verbose, 3 = debug, 4 = trace (PLY dumps)
+    bool show_stats = (args.verbosity >= 1);
+    bool verbose    = (args.verbosity >= 2);
+    bool debug      = (args.verbosity >= 4);  // PLY dumps only at level 4
+
+    args.filling_options.verbose       = verbose;
+    args.filling_options.show_progress = (args.verbosity > 0);
+
+    if (args.verbosity > 0) {
         std::cout << "=== MeshHoleFiller v" << Config::VERSION << " ===\n\n";
     }
 
     // Step 1: Load mesh as polygon soup (optimized - avoids mesh construction)
-    if (!args.quiet && args.filling_options.verbose) {
+    if (verbose) {
         std::cout << "Loading mesh from: " << args.input_file << "\n";
     }
 
@@ -242,7 +253,7 @@ cli_main(int argc, char** argv)
     PolygonSoup soup = std::move(soup_opt.value());
     Mesh mesh;  // Will be populated during preprocessing or immediately if no preprocessing
 
-    if (!args.quiet && args.filling_options.verbose) {
+    if (verbose) {
         std::cout << "Loaded polygon soup from: " << args.input_file << "\n";
         std::cout << "  Points: " << soup.points.size() << "\n";
         std::cout << "  Polygons: " << soup.polygons.size() << "\n";
@@ -253,7 +264,7 @@ cli_main(int argc, char** argv)
     ThreadingConfig thread_config;
     thread_config.num_threads = args.num_threads;
     thread_config.queue_size  = args.queue_size;
-    thread_config.verbose     = args.filling_options.verbose;
+    thread_config.verbose     = verbose;
 
     ThreadManager thread_manager(thread_config);
 
@@ -262,13 +273,13 @@ cli_main(int argc, char** argv)
 
     if (args.enable_preprocessing) {
         // Debug: Save original loaded soup before any preprocessing
-        if (args.debug) {
+        if (debug) {
             std::string debug_file = "debug_00_original_loaded.ply";
             // Convert soup to temporary mesh for debug output
             Mesh debug_mesh;
             PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);
             if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
-                if (!args.quiet) {
+                if (args.verbosity > 0) {
                     std::cout << "  [DEBUG] Saved original loaded soup: " << debug_file << "\n";
                     std::cout << "  [DEBUG]   Points: " << soup.points.size() << "\n";
                     std::cout << "  [DEBUG]   Polygons: " << soup.polygons.size() << "\n\n";
@@ -283,13 +294,13 @@ cli_main(int argc, char** argv)
         prep_opts.remove_isolated        = args.preprocess_remove_isolated;
         prep_opts.keep_largest_component = args.preprocess_keep_largest_component;
         prep_opts.non_manifold_passes    = args.non_manifold_passes;
-        prep_opts.verbose                = args.filling_options.verbose;
-        prep_opts.debug                  = args.debug;
+        prep_opts.verbose                = verbose;
+        prep_opts.debug                  = debug;
 
         // Preprocess soup directly (no mesh->soup extraction!)
         prep_stats = MeshPreprocessor::preprocess_soup(soup, mesh, prep_opts);
 
-        if (args.show_stats && args.filling_options.verbose) {
+        if (show_stats && verbose) {
             std::cout << "\n=== Preprocessing Report ===\n";
             std::cout << "Duplicate vertices merged: " << prep_stats.duplicates_merged << "\n";
             std::cout << "Non-manifold polygons removed: " << prep_stats.non_manifold_vertices_removed << "\n";
@@ -312,7 +323,7 @@ cli_main(int argc, char** argv)
 
         double convert_time_ms = std::chrono::duration<double, std::milli>(convert_end - convert_start).count();
 
-        if (!args.quiet && args.filling_options.verbose) {
+        if (args.verbosity > 0 && args.filling_options.verbose) {
             std::cout << "Converted soup to mesh (no preprocessing)\n";
             std::cout << "  Vertices: " << mesh.number_of_vertices() << "\n";
             std::cout << "  Faces: " << mesh.number_of_faces() << "\n";
@@ -322,7 +333,7 @@ cli_main(int argc, char** argv)
 
     // Validate mesh if requested (after conversion to mesh)
     if (args.validate) {
-        if (!args.quiet) {
+        if (args.verbosity > 0) {
             std::cout << "\n=== Input Mesh Validation ===\n";
         }
         MeshValidator::print_statistics(mesh, true);
@@ -342,16 +353,16 @@ cli_main(int argc, char** argv)
 
     if (args.use_partitioned) {
         // Use partitioned parallel filling (default mode)
-        if (!args.quiet && args.filling_options.verbose) {
+        if (args.verbosity > 0 && args.filling_options.verbose) {
             std::cout << "\n=== Partitioned Parallel Filling (Default) ===\n";
         }
 
         ParallelHoleFillerPipeline partitioned_processor(mesh, thread_manager, args.filling_options);
 
-        stats = partitioned_processor.process_partitioned(args.filling_options.verbose, args.debug);
+        stats = partitioned_processor.process_partitioned(args.filling_options.verbose, debug);
     } else {
         // Use legacy pipeline processing
-        if (!args.quiet && args.filling_options.verbose) {
+        if (args.verbosity > 0 && args.filling_options.verbose) {
             std::cout << "\n=== Legacy Pipeline Mode ===\n";
         }
 
@@ -368,7 +379,7 @@ cli_main(int argc, char** argv)
 
     // Check if no holes were found
     if (stats.num_holes_detected == 0) {
-        if (!args.quiet) {
+        if (args.verbosity > 0) {
             std::cout << "No holes found. Mesh is already closed.\n";
         }
 
@@ -383,7 +394,7 @@ cli_main(int argc, char** argv)
 
     // Step 4: Validate output mesh if requested
     if (args.validate) {
-        if (!args.quiet) {
+        if (args.verbosity > 0) {
             std::cout << "\n=== Output Mesh Validation ===\n";
         }
         MeshValidator::print_statistics(mesh, true);
@@ -394,7 +405,7 @@ cli_main(int argc, char** argv)
     }
 
     // Step 5: Save result
-    if (!args.quiet && args.filling_options.verbose) {
+    if (args.verbosity > 0 && args.filling_options.verbose) {
         std::cout << "\nSaving result to: " << args.output_file;
         // Check if output is PLY format (C++17 compatible)
         size_t len = args.output_file.length();
@@ -418,7 +429,7 @@ cli_main(int argc, char** argv)
     double save_time_ms = std::chrono::duration<double, std::milli>(save_end_time - save_start_time).count();
 
     // Step 6: Print detailed statistics if requested
-    if (args.show_stats) {
+    if (show_stats) {
         std::cout << "\n=== Detailed Statistics ===\n";
         std::cout << "Original mesh:\n";
         std::cout << "  Vertices: " << stats.original_vertices << "\n";
@@ -470,7 +481,7 @@ cli_main(int argc, char** argv)
         std::cout << "===========================\n";
     }
 
-    if (!args.quiet) {
+    if (args.verbosity > 0) {
         std::cout << "\nDone! Successfully processed mesh.\n";
     }
 

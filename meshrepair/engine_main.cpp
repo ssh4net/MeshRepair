@@ -19,6 +19,8 @@ void
 print_engine_help()
 {
     std::cerr << "MeshRepair Engine Mode (IPC)\n"
+              << "Version: " << Config::VERSION << "\n"
+              << "Built: " << Config::BUILD_DATE << " " << Config::BUILD_TIME << "\n"
               << "\n"
               << "Running as IPC engine for addon integration.\n"
               << "\n"
@@ -47,10 +49,14 @@ print_engine_help()
               << "     Example: meshrepair --socket 9876\n"
               << "\n"
               << "Options:\n"
-              << "  --socket PORT  Listen on TCP socket (port number)\n"
-              << "  --verbose, -v  Show debug output to stderr\n"
-              << "  --stats        Show detailed statistics and timing\n"
-              << "  --help, -h     Show this help message\n"
+              << "  --socket PORT      Listen on TCP socket (port number)\n"
+              << "  -v, --verbose <N>  Verbosity level (default: 1)\n"
+              << "                     0 = quiet\n"
+              << "                     1 = info (timing statistics)\n"
+              << "                     2 = verbose (detailed progress)\n"
+              << "                     3 = debug (verbose + debug logging)\n"
+              << "                     4 = trace (debug + PLY file dumps)\n"
+              << "  --help, -h         Show this help message\n"
               << "\n"
               << "Use Ctrl+C or send 'shutdown' command to exit.\n";
 }
@@ -58,16 +64,24 @@ print_engine_help()
 int
 engine_main(int argc, char** argv)
 {
+    bool socket_mode = false;
     // Check for engine-specific options
-    bool verbose = false;
-    bool show_stats = false;
+    int verbosity = 1;  // Default: info level (stats)
     int socket_port = 0;  // 0 = pipe mode, >0 = socket mode
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--verbose") == 0 || std::strcmp(argv[i], "-v") == 0) {
-            verbose = true;
-        } else if (std::strcmp(argv[i], "--stats") == 0) {
-            show_stats = true;
+            // Check if next arg is a number
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                verbosity = std::atoi(argv[i + 1]);
+                ++i;  // Skip the level argument
+                if (verbosity < 0 || verbosity > 4) {
+                    std::cerr << "ERROR: Verbosity level must be 0-4\n";
+                    return 1;
+                }
+            } else {
+                verbosity = 2;  // Default to verbose if no level specified
+            }
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_engine_help();
             return 0;
@@ -93,8 +107,16 @@ engine_main(int argc, char** argv)
         }
     }
 
+    // Derive flags from verbosity level
+    // 0 = quiet, 1 = info (stats), 2 = verbose, 3 = debug, 4 = trace (PLY dumps)
+    bool show_stats = (verbosity >= 1);
+    bool verbose    = (verbosity >= 2);
+    bool debug      = (verbosity >= 4);  // PLY file dumps only at level 4
+
+    socket_mode = (socket_port > 0);
+
     // Socket mode
-    if (socket_port > 0) {
+    if (socket_mode) {
         // Initialize sockets (Windows only)
         if (!SocketServer::init_sockets()) {
             std::cerr << "ERROR: Failed to initialize socket library\n";
@@ -170,24 +192,41 @@ engine_main(int argc, char** argv)
         }
     }
 
+    // Set binary mode for stdin/stdout FIRST (before any stderr writes)
+    // This prevents Windows from mixing stderr bytes into stdout
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);  // Also set stderr to binary to prevent mixing
+#endif
+
     // Pipe mode (default)
-    if (verbose) {
+    // Write startup messages to stderr AFTER binary mode is set
+    if (verbose && socket_mode) {
         std::cerr << "MeshRepair v" << Config::VERSION << " - Engine Mode (Pipe)\n";
         std::cerr << "Starting IPC engine...\n";
         std::cerr << "Protocol: Binary-framed JSON messages\n";
         std::cerr << "Input: stdin (binary) | Output: stdout (binary) | Logs: stderr\n";
         std::cerr << "\n";
+        std::cerr << "Batch mode: Engine will process all commands from stdin until EOF.\n";
+        std::cerr << "This pattern avoids Windows pipe EOF issues by sending all commands\n";
+        std::cerr << "upfront, closing stdin to signal end of input.\n";
+        std::cerr << "\n";
+        std::cerr.flush();  // Flush stderr before first stdout write
     }
-    if (show_stats) {
+    if (show_stats && socket_mode) {
         std::cerr << "Stats mode enabled\n";
+        std::cerr.flush();  // Flush stderr before first stdout write
     }
 
-    // Set binary mode for stdin/stdout to prevent newline translation
-    // (important on Windows)
-#ifdef _WIN32
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
+    // NOTE: We do NOT untie cin/cout or disable sync_with_stdio because:
+    // 1. On Windows, untying cin.tie(nullptr) causes cin to misbehave with binary pipes
+    // 2. std::cin is pre-initialized in text mode before _setmode is called
+    // 3. Changing FD mode with _setmode doesn't update cin's internal buffers
+    // 4. Keep default C++ stream behavior to avoid Windows-specific bugs
+    //
+    // Alternative considered: Using raw file descriptors (read/write on FD 0/1)
+    // but keeping std::cin/cout for now to minimize changes
 
     try {
         // Create command handler (pipe mode = false, pass verbose and stats flags)
@@ -196,13 +235,15 @@ engine_main(int argc, char** argv)
         // Run message loop
         int exit_code = handler.run_message_loop(std::cin);
 
-        if (verbose) {
+        if (verbose && socket_mode) {
             std::cerr << "Engine shutdown complete (exit code: " << exit_code << ")\n";
         }
 
         return exit_code;
     } catch (const std::exception& ex) {
-        std::cerr << "FATAL ERROR in pipe mode: " << ex.what() << "\n";
+        if (socket_mode) {
+            std::cerr << "FATAL ERROR in pipe mode: " << ex.what() << "\n";
+        }
         return 1;
     }
 }

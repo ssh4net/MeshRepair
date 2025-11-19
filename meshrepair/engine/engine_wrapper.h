@@ -14,6 +14,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <fstream>
 
 namespace MeshRepair {
 namespace Engine {
@@ -63,7 +64,7 @@ namespace Engine {
         nlohmann::json save_mesh_to_data();
 
         // Query state
-        bool has_mesh() const { return mesh_.has_value(); }
+        bool has_mesh() const { return mesh_.has_value() || soup_.has_value(); }
         bool has_holes_detected() const { return holes_detected_; }
 
         // Direct mesh access (for binary serialization)
@@ -83,7 +84,8 @@ namespace Engine {
     private:
         // State
         EngineState state_;
-        std::optional<Mesh> mesh_;
+        std::optional<PolygonSoup> soup_;  // Soup-based workflow (optimized)
+        std::optional<Mesh> mesh_;         // Mesh created after preprocessing or on-demand
         bool holes_detected_;
 
         // Statistics
@@ -102,11 +104,16 @@ namespace Engine {
         // Debug mode
         bool debug_mode_;
 
+        // File logging
+        std::ofstream log_file_;
+        std::string log_file_path_;
+
         // Helper methods
         void log(const std::string& level, const std::string& message);
         void report_progress(double progress, const std::string& status);
         bool should_cancel();
         void ensure_state(EngineState expected_state, const std::string& operation);
+        void ensure_mesh_exists();  // Convert soup→mesh if needed (for operations requiring mesh)
         void dump_debug_mesh(const std::string& prefix, const std::string& description);
     };
 

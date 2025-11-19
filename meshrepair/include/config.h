@@ -8,8 +8,15 @@ namespace MeshRepair {
 namespace Config {
 
     // Version information
-    constexpr const char* VERSION  = "1.0.0";
-    constexpr const char* APP_NAME = "MeshHoleFiller";
+    constexpr int VERSION_MAJOR        = 1;
+    constexpr int VERSION_MINOR        = 0;
+    constexpr int VERSION_PATCH        = 0;
+    constexpr const char* VERSION      = "1.0.0";
+    constexpr const char* APP_NAME     = "MeshHoleFiller";
+
+    // Build information (updated at compile time)
+    constexpr const char* BUILD_DATE   = __DATE__;
+    constexpr const char* BUILD_TIME   = __TIME__;
 
     // Default hole filling parameters
     constexpr unsigned int DEFAULT_FAIRING_CONTINUITY = 1;     // C1 continuity

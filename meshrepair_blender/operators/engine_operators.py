@@ -81,16 +81,26 @@ class MESHREPAIR_OT_test_engine(Operator):
 
         # Test engine by starting it and getting info
         try:
-            session = EngineSession(prefs.engine_path)
+            session = EngineSession(
+                prefs.engine_path,
+                verbosity=int(prefs.verbosity_level),
+                socket_mode=prefs.use_socket_mode,
+                socket_host=prefs.socket_host,
+                socket_port=prefs.socket_port
+            )
             info = session.test()
             session.stop()
 
             # Extract info from response
             mesh_info = info.get('mesh_info', {})
             preprocessing_stats = info.get('preprocessing_stats', {})
+            version = info.get('version', 'unknown')
+            build_date = info.get('build_date', 'unknown')
+            build_time = info.get('build_time', 'unknown')
 
             # Build info message
             msg = f"Engine test successful | "
+            msg += f"Version: {version}, Built: {build_date} {build_time} | "
             msg += f"Mesh: {mesh_info.get('vertices', 0)} verts, {mesh_info.get('faces', 0)} faces"
 
             if preprocessing_stats:

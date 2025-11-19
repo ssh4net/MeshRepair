@@ -110,8 +110,7 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
             # Start engine session
             session = EngineSession(
                 prefs.engine_path,
-                verbose=prefs.show_debug_info,
-                show_stats=prefs.show_stats,
+                verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
                 socket_port=prefs.socket_port
@@ -208,8 +207,7 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
             # Start engine session
             session = EngineSession(
                 prefs.engine_path,
-                verbose=prefs.show_debug_info,
-                show_stats=prefs.show_stats,
+                verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
                 socket_port=prefs.socket_port
@@ -283,8 +281,7 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
             # Start engine session
             session = EngineSession(
                 prefs.engine_path,
-                verbose=prefs.show_debug_info,
-                show_stats=prefs.show_stats,
+                verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
                 socket_port=prefs.socket_port
@@ -402,8 +399,7 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
             # Start engine session
             session = EngineSession(
                 prefs.engine_path,
-                verbose=prefs.show_debug_info,
-                show_stats=prefs.show_stats,
+                verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
                 socket_port=prefs.socket_port
@@ -484,9 +480,25 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
             return {'FINISHED'}
 
         except Exception as ex:
-            msg = f"Repair failed: {str(ex)}"
+            # Get full exception details including type
+            import traceback
+            exc_type = type(ex).__name__
+            exc_msg = str(ex)
+            exc_trace = traceback.format_exc()
+
+            msg = f"Repair failed: [{exc_type}] {exc_msg}"
             self.console_report('ERROR', msg)
-            props.last_operation_status = f"Error: {str(ex)}"
+            props.last_operation_status = f"Error: {exc_msg}"
+
+            # Print full traceback to console for debugging
+            print(f"[MeshRepair ERROR] Exception traceback:", file=sys.stdout)
+            print(exc_trace, file=sys.stdout)
+            sys.stdout.flush()
+
+            # Print log file location for debugging
+            if session and hasattr(session, 'log_file_path') and session.log_file_path:
+                self.console_report('ERROR', f"Check engine log: {session.log_file_path}")
+
             return {'CANCELLED'}
 
         finally:

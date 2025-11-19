@@ -50,7 +50,7 @@ class EngineManager:
     - Clean shutdown
     """
 
-    def __init__(self, engine_path, socket_mode=False, socket_host="localhost", socket_port=9876, verbose=False, show_stats=False):
+    def __init__(self, engine_path, socket_mode=False, socket_host="localhost", socket_port=9876, verbosity=1):
         """
         Initialize engine manager.
 
@@ -59,15 +59,13 @@ class EngineManager:
             socket_mode: If True, connect via TCP socket instead of subprocess
             socket_host: Hostname for socket connection
             socket_port: Port for socket connection
-            verbose: Enable verbose output from engine (--verbose flag)
-            show_stats: Enable detailed statistics output from engine (--stats flag)
+            verbosity: Verbosity level 0-3 (0=quiet, 1=info/stats, 2=verbose, 3=debug)
         """
         self.engine_path = engine_path
         self.socket_mode = socket_mode
         self.socket_host = socket_host
         self.socket_port = socket_port
-        self.verbose = verbose
-        self.show_stats = show_stats
+        self.verbosity = verbosity
 
         # Subprocess mode
         self.engine_proc = None
@@ -80,6 +78,7 @@ class EngineManager:
         # Common
         self.connection_thread = None
         self.message_queue = None
+        self.batch_active = False  # Track if batch mode is active (stdin closed)
 
     def start(self):
         """
@@ -101,42 +100,60 @@ class EngineManager:
         try:
             # Build command line arguments
             args = [self.engine_path, '--engine']
-            if self.verbose:
-                args.append('--verbose')
-            if self.show_stats:
-                args.append('--stats')
+            if self.verbosity > 0:
+                args.extend(['-v', str(self.verbosity)])
 
             # Log engine startup
             print(f"[MeshRepair INFO] Starting engine: {' '.join(args)}", file=sys.stdout)
             sys.stdout.flush()
 
+            # Windows-specific: CREATE_NEW_PROCESS_GROUP prevents pipe closure issues
+            popen_kwargs = {
+                'stdin': subprocess.PIPE,
+                'stdout': subprocess.PIPE,
+                # NOTE: We do NOT pipe stderr on Windows - let it go to console
+                # Piping stderr can cause file descriptor mix-ups and binary corruption
+                # stderr goes to parent's stderr (Blender console) directly
+                # Use default buffering (like UVPackmaster) - no bufsize parameter
+            }
+
+            if sys.platform == 'win32':
+                # CREATE_NEW_PROCESS_GROUP for better process isolation
+                popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                # On Unix-like systems, it's safe to pipe stderr
+                popen_kwargs['stderr'] = subprocess.PIPE
+
             # Spawn engine process with --engine flag to enable IPC mode
-            self.engine_proc = subprocess.Popen(
-                args,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0  # Unbuffered
-            )
+            self.engine_proc = subprocess.Popen(args, **popen_kwargs)
 
             # Create message queue
             self.message_queue = queue.Queue()
 
+            # Use stdout stream directly (default buffering works on all platforms)
+            stdout_stream = self.engine_proc.stdout
+            print(f"[MeshRepair DEBUG] Stdout stream type: {type(stdout_stream)}", file=sys.stdout)
+            sys.stdout.flush()
+
             # Start background thread for reading stdout
             self.connection_thread = threading.Thread(
                 target=connection_thread_func,
-                args=(self.engine_proc.stdout, self.message_queue),
+                args=(stdout_stream, self.message_queue),
                 daemon=True
             )
             self.connection_thread.start()
 
-            # Start background thread for reading stderr
-            self.stderr_thread = threading.Thread(
-                target=stderr_thread_func,
-                args=(self.engine_proc.stderr,),
-                daemon=True
-            )
-            self.stderr_thread.start()
+            # Start background thread for reading stderr (only if piped)
+            if self.engine_proc.stderr is not None:
+                self.stderr_thread = threading.Thread(
+                    target=stderr_thread_func,
+                    args=(self.engine_proc.stderr,),
+                    daemon=True
+                )
+                self.stderr_thread.start()
+            else:
+                # stderr goes directly to console - no thread needed
+                print(f"[MeshRepair INFO] Engine stderr output will appear directly in console", file=sys.stdout)
 
             print(f"[MeshRepair INFO] Engine started with PID {self.engine_proc.pid}", file=sys.stdout)
             sys.stdout.flush()
@@ -215,6 +232,41 @@ class EngineManager:
             write_message(self.socket_file, command_dict)
         else:
             write_message(self.engine_proc.stdin, command_dict)
+
+    def send_commands_batch(self, commands):
+        """
+        Send multiple commands at once (batch mode).
+
+        This sends all commands to stdin, then closes stdin to signal end of input.
+        The engine will process all commands and send responses via stdout.
+        This pattern avoids Windows pipe EOF issues with bidirectional communication.
+
+        Args:
+            commands: List of command dictionaries
+
+        Raises:
+            RuntimeError: If engine not running
+        """
+        if not self.is_running():
+            raise RuntimeError("Engine not running")
+
+        print(f"[MeshRepair INFO] Sending batch of {len(commands)} commands", file=sys.stdout)
+        sys.stdout.flush()
+
+        # Write all commands to stdin
+        for cmd in commands:
+            if self.socket_mode:
+                write_message(self.socket_file, cmd)
+            else:
+                write_message(self.engine_proc.stdin, cmd)
+
+        # Close stdin to signal end of commands (pipe mode only)
+        # This is the key to avoiding Windows pipe EOF issues
+        if not self.socket_mode and self.engine_proc.stdin:
+            print(f"[MeshRepair INFO] Closing stdin (batch mode)", file=sys.stdout)
+            sys.stdout.flush()
+            self.engine_proc.stdin.close()
+            self.batch_active = True  # Mark batch as active
 
     def read_response(self, timeout=None):
         """
@@ -308,17 +360,30 @@ class EngineManager:
         if not self.engine_proc:
             return 0
 
-        # Try graceful shutdown
-        try:
-            self.send_command({"command": "shutdown"})
-            self.engine_proc.wait(timeout=timeout)
-        except (RuntimeError, subprocess.TimeoutExpired):
-            # Force kill
-            self.engine_proc.kill()
-            self.engine_proc.wait()
+        # In batch mode, stdin is already closed, so we can't send shutdown command
+        # Just terminate the process (it's already waiting for termination)
+        if self.batch_active:
+            try:
+                # Process might already be terminated by execute_batch()
+                if self.engine_proc.poll() is None:
+                    self.engine_proc.terminate()
+                    self.engine_proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                self.engine_proc.kill()
+                self.engine_proc.wait()
+        else:
+            # Interactive mode: try graceful shutdown
+            try:
+                self.send_command({"command": "shutdown"})
+                self.engine_proc.wait(timeout=timeout)
+            except (RuntimeError, subprocess.TimeoutExpired):
+                # Force kill
+                self.engine_proc.kill()
+                self.engine_proc.wait()
 
         exit_code = self.engine_proc.returncode
         self.engine_proc = None
+        self.batch_active = False
         return exit_code
 
     def _stop_socket_mode(self):

@@ -15,6 +15,20 @@ namespace Engine {
         }
     }
 
+    // Helper: Convert 2 bytes to uint16_t (little-endian)
+    static uint16_t bytes_to_uint16_le(const char* bytes)
+    {
+        return static_cast<uint16_t>(static_cast<uint8_t>(bytes[0]))
+               | static_cast<uint16_t>(static_cast<uint8_t>(bytes[1]) << 8);
+    }
+
+    // Helper: Convert uint16_t to 2 bytes (little-endian)
+    static void uint16_to_bytes_le(uint16_t value, char* bytes)
+    {
+        bytes[0] = static_cast<char>(value & 0xFF);
+        bytes[1] = static_cast<char>((value >> 8) & 0xFF);
+    }
+
     // Helper: Convert 4 bytes to uint32_t (little-endian)
     static uint32_t bytes_to_uint32_le(const char* bytes)
     {
@@ -35,9 +49,20 @@ namespace Engine {
 
     nlohmann::json read_message(std::istream& stream, MessageType* out_type)
     {
-        // Read header: [length:4][type:1]
-        char header[HEADER_SIZE_BYTES];
-        read_exact(stream, header, HEADER_SIZE_BYTES);
+        // Read magic + header: [magic:2][length:4][type:1]
+        char frame_header[FRAME_SIZE_BYTES];
+        read_exact(stream, frame_header, FRAME_SIZE_BYTES);
+
+        // Validate magic marker
+        uint16_t magic = bytes_to_uint16_le(frame_header);
+        if (magic != PROTOCOL_MAGIC) {
+            std::ostringstream oss;
+            oss << "Protocol desynchronization: expected magic 0x" << std::hex << PROTOCOL_MAGIC << ", got 0x"
+                << magic;
+            throw std::runtime_error(oss.str());
+        }
+
+        const char* header = frame_header + MAGIC_SIZE_BYTES;
 
         // Parse length
         uint32_t payload_length = bytes_to_uint32_le(header);
@@ -92,13 +117,18 @@ namespace Engine {
             throw std::runtime_error(oss.str());
         }
 
-        // Build header: [length:4][type:1]
-        char header[HEADER_SIZE_BYTES];
-        uint32_to_bytes_le(payload_length, header);
-        header[4] = static_cast<char>(static_cast<uint8_t>(type));
+        // Build magic + header: [magic:2][length:4][type:1]
+        char frame_header[FRAME_SIZE_BYTES];
+        uint16_to_bytes_le(PROTOCOL_MAGIC, frame_header);
+        uint32_to_bytes_le(payload_length, frame_header + MAGIC_SIZE_BYTES);
+        frame_header[FRAME_SIZE_BYTES - 1] = static_cast<char>(static_cast<uint8_t>(type));
+
+        // DEBUG: Log header bytes (only to stderr in socket mode - NEVER in pipe mode!)
+        // This is disabled for now to avoid any stderr contamination
+        // std::cerr << "[Protocol] Writing: length=" << payload_length << ", type=" << static_cast<int>(type) << "\n";
 
         // Write header + payload
-        stream.write(header, HEADER_SIZE_BYTES);
+        stream.write(frame_header, FRAME_SIZE_BYTES);
         stream.write(payload.c_str(), payload_length);
         stream.flush();
 

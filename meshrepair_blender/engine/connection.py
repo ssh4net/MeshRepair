@@ -17,10 +17,12 @@ import struct
 import json
 import sys
 
-# Message type constants
+# Protocol constants
 MSG_TYPE_COMMAND = 0x01
 MSG_TYPE_RESPONSE = 0x02
 MSG_TYPE_EVENT = 0x03
+PROTOCOL_MAGIC = 0xABCD
+MAGIC_BYTES = struct.pack('<H', PROTOCOL_MAGIC)
 
 
 def read_message(stream):
@@ -43,20 +45,41 @@ def read_message(stream):
     Raises:
         RuntimeError: If stream closed or invalid message
     """
+    # Read magic (2 bytes) and validate
+    magic_bytes = force_read_bytes(stream, 2)
+    magic = struct.unpack('<H', magic_bytes)[0]
+    if magic != PROTOCOL_MAGIC:
+        raise RuntimeError(f"Protocol desync: expected 0x{PROTOCOL_MAGIC:04x}, got 0x{magic:04x}")
+
     # Read length (4 bytes, little-endian)
     length_bytes = force_read_bytes(stream, 4)
+
     length = struct.unpack('<I', length_bytes)[0]
+
+    # Validate length (critical - prevents hanging on protocol corruption)
+    MAX_MESSAGE_SIZE = 100 * 1024 * 1024  # 100 MB
+    if length == 0:
+        raise RuntimeError(f"Invalid message: payload length is 0 (protocol corruption)")
+    if length > MAX_MESSAGE_SIZE:
+        raise RuntimeError(f"Invalid message: payload length {length} exceeds maximum {MAX_MESSAGE_SIZE} (protocol corruption)")
 
     # Read type (1 byte)
     type_bytes = force_read_bytes(stream, 1)
     msg_type = struct.unpack('B', type_bytes)[0]
 
+    # Validate type
+    if msg_type not in (MSG_TYPE_COMMAND, MSG_TYPE_RESPONSE, MSG_TYPE_EVENT):
+        raise RuntimeError(f"Invalid message type: 0x{msg_type:02x} (expected 0x01, 0x02, or 0x03)")
+
     # Read payload
     payload_bytes = force_read_bytes(stream, length)
 
     # Parse JSON
-    payload_str = payload_bytes.decode('utf-8')
-    msg = json.loads(payload_str)
+    try:
+        payload_str = payload_bytes.decode('utf-8')
+        msg = json.loads(payload_str)
+    except (UnicodeDecodeError, json.JSONDecodeError) as ex:
+        raise RuntimeError(f"Failed to parse message payload: {ex}")
 
     return (msg_type, msg)
 
@@ -80,14 +103,18 @@ def write_message(stream, msg):
 
     # Write length (4 bytes, little-endian)
     length = len(payload_bytes)
-    stream.write(struct.pack('<I', length))
+    frame = bytearray()
+    frame.extend(MAGIC_BYTES)
+    frame.extend(struct.pack('<I', length))
+    frame.extend(struct.pack('B', MSG_TYPE_COMMAND))
+    frame.extend(payload_bytes)
 
-    # Write type (1 byte) - always 0x01 for commands
-    stream.write(struct.pack('B', 0x01))
-
-    # Write payload
-    stream.write(payload_bytes)
+    stream.write(frame)
     stream.flush()
+
+    cmd_name = msg.get('command', 'unknown')
+    print(f"[MeshRepair DEBUG] Sent command '{cmd_name}' ({length} bytes payload)", file=sys.stdout)
+    sys.stdout.flush()
 
 
 def force_read_bytes(stream, count):
@@ -126,12 +153,25 @@ def connection_thread_func(stream, queue):
     Note:
         This function runs in a daemon thread and exits on exception.
     """
+    print(f"[MeshRepair DEBUG] Connection thread started", file=sys.stdout)
+    sys.stdout.flush()
+
     try:
+        msg_count = 0
         while True:
+            print(f"[MeshRepair DEBUG] Waiting for message #{msg_count + 1}...", file=sys.stdout)
+            sys.stdout.flush()
+
             msg_type, msg = read_message(stream)
+            msg_count += 1
+
+            print(f"[MeshRepair DEBUG] Received message #{msg_count}, type={msg_type}", file=sys.stdout)
+            sys.stdout.flush()
 
             if msg_type == MSG_TYPE_RESPONSE:
                 # Queue response messages for read_response()
+                print(f"[MeshRepair DEBUG] Queuing RESPONSE #{msg_count}", file=sys.stdout)
+                sys.stdout.flush()
                 queue.put(msg)
             elif msg_type == MSG_TYPE_EVENT:
                 # Log event messages but don't queue them
@@ -154,8 +194,41 @@ def connection_thread_func(stream, queue):
                 print(f"[MeshRepair WARNING] Unknown message type: {msg_type}", file=sys.stderr)
                 sys.stderr.flush()
 
+    except RuntimeError as ex:
+        # Stream closed - this is expected in batch mode after all responses are read
+        # Don't treat as error - just exit gracefully
+        if "Stream closed unexpectedly" in str(ex):
+            print(f"[MeshRepair INFO] Connection thread: Stream closed (engine exited)", file=sys.stdout)
+            sys.stdout.flush()
+            # Don't queue error message - this is normal batch mode completion
+        else:
+            # Other RuntimeErrors are actual errors
+            import traceback
+            exc_trace = traceback.format_exc()
+
+            print(f"[MeshRepair ERROR] Connection thread exception: {type(ex).__name__}: {str(ex)}", file=sys.stderr)
+            print(f"[MeshRepair ERROR] Connection thread traceback:", file=sys.stderr)
+            print(exc_trace, file=sys.stderr)
+            sys.stderr.flush()
+
+            error_msg = {
+                'type': 'error',
+                'error': {
+                    'message': f"Connection error: {str(ex)}"
+                }
+            }
+            queue.put(error_msg)
+
     except Exception as ex:
-        # Engine died or pipe closed
+        # Other exceptions are errors
+        import traceback
+        exc_trace = traceback.format_exc()
+
+        print(f"[MeshRepair ERROR] Connection thread exception: {type(ex).__name__}: {str(ex)}", file=sys.stderr)
+        print(f"[MeshRepair ERROR] Connection thread traceback:", file=sys.stderr)
+        print(exc_trace, file=sys.stderr)
+        sys.stderr.flush()
+
         error_msg = {
             'type': 'error',
             'error': {

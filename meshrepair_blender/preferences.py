@@ -68,40 +68,29 @@ class MeshRepairPreferences(AddonPreferences):
         subtype='DIR_PATH'
     )
 
-    log_level: EnumProperty(
-        name="Log Level",
-        description="Logging verbosity",
-        items=[
-            ('ERROR', "Error", "Errors only"),
-            ('WARNING', "Warning", "Warnings and errors"),
-            ('INFO', "Info", "Informational messages"),
-            ('DEBUG', "Debug", "Detailed debug information"),
-        ],
-        default='INFO'
-    )
-
     keep_temp_files: BoolProperty(
         name="Keep Temp Files",
         description="Don't delete temporary files (for debugging)",
         default=False
     )
 
-    show_debug_info: BoolProperty(
-        name="Show Debug Info",
-        description="Show debug information in console (--verbose flag)",
-        default=False
+    verbosity_level: EnumProperty(
+        name="Verbosity Level",
+        description="Engine output verbosity (0=Quiet, 1=Info/Stats, 2=Verbose, 3=Debug, 4=Trace/PLY dumps)",
+        items=[
+            ('0', "Quiet", "Minimal output - errors only"),
+            ('1', "Info", "Timing statistics and summaries (Default)"),
+            ('2', "Verbose", "Detailed progress and operation logs"),
+            ('3', "Debug", "Full debug output and logging"),
+            ('4', "Trace", "Debug + PLY file dumps (writes to Blender app folder)"),
+        ],
+        default='1'
     )
 
-    show_stats: BoolProperty(
-        name="Show Statistics",
-        description="Show detailed timing statistics for performance analysis (--stats flag)",
-        default=False
-    )
-
-    # Socket mode (more stable than pipes)
+    # Socket mode (for debugging only)
     use_socket_mode: BoolProperty(
         name="Use Socket Mode",
-        description="Connect to engine via TCP socket (more stable, allows manual engine startup)",
+        description="Connect to engine via TCP socket (for debugging only)",
         default=False
     )
 
@@ -164,16 +153,25 @@ class MeshRepairPreferences(AddonPreferences):
 
         box = col.box()
         box_col = box.column(align=True)
-        box_col.prop(self, "temp_dir")
-        box_col.prop(self, "log_level")
-        box_col.prop(self, "keep_temp_files")
-        box_col.prop(self, "show_debug_info")
-        box_col.prop(self, "show_stats")
+        box_col.prop(self, "verbosity_level")
 
-        # Socket Mode
+        # Warning for trace mode (PLY dumps)
+        if self.verbosity_level == '4':
+            warning_box = box_col.box()
+            warning_col = warning_box.column(align=True)
+            warning_col.alert = True
+            warning_col.label(text="WARNING: Trace mode enabled", icon='ERROR')
+            warning_col.label(text="PLY files will be written to Blender app folder:")
+            warning_col.label(text=f"  {bpy.app.binary_path_python.rsplit(os.sep, 2)[0]}")
+            warning_col.label(text="This can consume significant disk space!")
+
+        box_col.prop(self, "temp_dir")
+        box_col.prop(self, "keep_temp_files")
+
+        # Socket Mode (debugging only)
         layout.separator()
         col = layout.column(align=True)
-        col.label(text="Socket Mode (Advanced):", icon='NETWORK_DRIVE')
+        col.label(text="Socket Mode (Debugging Only):", icon='NETWORK_DRIVE')
 
         box = col.box()
         box_col = box.column(align=True)
@@ -183,7 +181,7 @@ class MeshRepairPreferences(AddonPreferences):
             sub = box_col.box()
             sub_col = sub.column(align=True)
             sub_col.label(text="Manual Engine Startup:", icon='INFO')
-            sub_col.label(text=f"  meshrepair --socket {self.socket_port}")
+            sub_col.label(text=f"  meshrepair --engine --socket {self.socket_port}")
             sub_col.separator()
             sub_col.prop(self, "socket_host")
             sub_col.prop(self, "socket_port")

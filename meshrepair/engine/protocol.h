@@ -9,8 +9,9 @@ namespace MeshRepair {
 namespace Engine {
 
     // Binary protocol message format:
-    // [length:4 bytes][type:1 byte][json_payload:N bytes]
+    // [magic:2 bytes][length:4 bytes][type:1 byte][json_payload:N bytes]
     //
+    // magic: uint16_t (little-endian) - constant sanity check marker
     // length: uint32_t (little-endian) - size of json_payload in bytes
     // type: uint8_t - message type (0x01 = command, 0x02 = response, 0x03 = event)
     // json_payload: UTF-8 encoded JSON string
@@ -22,8 +23,11 @@ namespace Engine {
     };
 
     // Protocol constants
-    constexpr size_t HEADER_SIZE_BYTES  = 5;                  // 4 (length) + 1 (type)
-    constexpr uint32_t MAX_MESSAGE_SIZE = 100 * 1024 * 1024;  // 100 MB max
+    constexpr uint16_t PROTOCOL_MAGIC      = 0xABCD;
+    constexpr size_t   MAGIC_SIZE_BYTES    = sizeof(uint16_t);
+    constexpr size_t   HEADER_SIZE_BYTES   = 5;                  // 4 (length) + 1 (type)
+    constexpr size_t   FRAME_SIZE_BYTES    = MAGIC_SIZE_BYTES + HEADER_SIZE_BYTES;
+    constexpr uint32_t MAX_MESSAGE_SIZE    = 100 * 1024 * 1024;  // 100 MB max
 
     // Read a complete message from stream
     // Returns: parsed JSON object

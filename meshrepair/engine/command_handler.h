@@ -4,6 +4,7 @@
 #include "protocol.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
+#include <mutex>
 
 namespace MeshRepair {
 namespace Engine {
@@ -58,6 +59,9 @@ namespace Engine {
 
         // Shutdown flag
         bool shutdown_requested_;
+
+        // Mutex for stdout writes (prevents protocol corruption on Windows)
+        std::mutex write_mutex_;
 
         // Callbacks for engine
         void on_progress(double progress, const std::string& status);

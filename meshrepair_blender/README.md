@@ -1,163 +1,226 @@
 # Mesh Repair - Blender Addon
 
-Professional mesh hole filling and repair using CGAL algorithms.
+Professional mesh hole filling and repair using CGAL algorithms, integrated seamlessly into Blender.
 
 ## Features
 
 - **Automatic Hole Filling**: Advanced algorithms for high-quality hole repair
-- **Preprocessing**: Remove duplicates, non-manifold vertices, isolated vertices
-- **Multiple Modes**: Full automatic repair or step-by-step control
+- **Smart Preprocessing**: Automatically clean up duplicates, non-manifold vertices, and topology issues
 - **Quality Presets**: Fast, Quality, and High Quality repair options
 - **Edit Mode Support**: Repair selected faces or entire mesh
 - **Parallel Processing**: Multi-threaded for fast processing of large meshes
+- **Non-Destructive**: Original mesh remains unchanged until you apply results
 
 ## Installation
 
 ### Requirements
 
 - **Blender**: 3.3 or later
-- **meshrepair_engine**: C++ engine executable (must be installed separately)
+- **meshrepair_engine**: C++ engine executable (prebuilt binaries available)
 
-### Steps
+### Step 1: Download Engine Binary
 
-1. **Download or Clone** this repository
-2. **Install Engine**: Build and install `meshrepair_engine` (see main project README)
-3. **Install Addon**:
-   - Open Blender
-   - Edit → Preferences → Add-ons
-   - Click "Install..."
-   - Navigate to `meshrepair_blender` folder
-   - Select any Python file (e.g., `__init__.py`)
-   - Click "Install Add-on"
-   - Enable the "Mesh Repair" addon
+**Prebuilt binaries** are available for download:
 
-4. **Configure Engine Path**:
-   - In Add-ons preferences, expand "Mesh Repair"
-   - Set "Engine Path" to your `meshrepair_engine` executable
-   - Or click "Detect Engine" to auto-detect
+ **Download from Patreon**: https://www.patreon.com/c/MadProcessor/posts?filters%5Btag%5D=meshrepair
+
+Available for:
+- Windows (x64)
+- Linux (x64)
+- macOS (Intel & Apple Silicon)
+
+### Step 2: Install Addon
+
+1. **Download** the `meshrepair_blender` folder from this repository
+2. Open **Blender**
+3. Go to **Edit  Preferences  Add-ons**
+4. Click **"Install..."** button
+5. Navigate to the `meshrepair_blender` folder
+6. Select the `__init__.py` file
+7. Click **"Install Add-on"**
+8. Enable the **"Mesh: Mesh Repair"** checkbox
+
+### Step 3: Configure Engine
+
+After enabling the addon:
+
+1. In **Preferences  Add-ons**, expand **"Mesh Repair"**
+2. Click **"Browse"** next to "Engine Path"
+3. Select your downloaded `meshrepair_engine` executable
+4. Click **"Test Engine"** to verify it works
+
+**Auto-detect**: Click **"Detect Engine"** to automatically find the executable in common locations.
 
 ## Usage
 
-### Quick Start
+### Quick Repair (Recommended)
 
-1. Select a mesh object
-2. Open the 3D Viewport sidebar (press `N`)
-3. Go to "Mesh Repair" tab
+1. **Select** a mesh object in Object Mode
+2. Press **`N`** to open the sidebar
+3. Go to **"Mesh Repair"** tab
 4. Click one of the quick repair buttons:
-   - **Repair (Fast)**: C⁰ continuity, no refinement
-   - **Repair (Quality)**: C¹ continuity, with refinement *(recommended)*
-   - **Repair (High Quality)**: C² continuity, full refinement
+   - **Repair (Fast)**: Quick repair, C continuity
+   - **Repair (Quality)**: Balanced quality, C continuity *(recommended)*
+   - **Repair (High Quality)**: Best quality, C continuity
 
-### Advanced Usage
+The addon will automatically:
+- Clean up the mesh (remove duplicates, fix topology)
+- Detect all holes
+- Fill holes with smooth patches
+- Show results and statistics
 
-#### Custom Step-by-Step
+### Advanced: Step-by-Step Mode
 
-1. Change "Operation Mode" to "Custom Steps"
-2. Click each step individually:
-   - **Preprocess Mesh**: Clean up topology
-   - **Detect Holes**: Find all holes
-   - **Fill Holes**: Fill detected holes
-3. View results after each step
+For more control over the repair process:
 
-#### Edit Mode Selection
+1. Change **"Operation Mode"** to **"Custom Steps"**
+2. Run each step individually:
+   - **Step 1: Preprocess Mesh** - Clean up topology
+   - **Step 2: Detect Holes** - Find all holes in the mesh
+   - **Step 3: Fill Holes** - Fill the detected holes
+3. View results after each step in the **Results & Statistics** panel
 
-1. Enter Edit Mode (`Tab`)
-2. Select faces around holes
-3. In Mesh Repair panel:
-   - Choose "Selection" to repair only selected area
-   - Or choose "Whole Mesh" to ignore selection
-4. Click repair button
+### Repair Selected Area (Edit Mode)
 
-### Settings
+To repair only part of a mesh:
 
-#### Preprocessing Options
+1. Enter **Edit Mode** (`Tab`)
+2. **Select faces** around the area you want to repair
+3. In the **Mesh Repair** panel:
+   - Set **"Mesh Scope"** to **"Selection"**
+4. Click a repair button
+5. Only the selected area will be processed
+
+## Settings
+
+### Preprocessing Options
+
+Fine-tune mesh cleanup before hole filling:
+
 - **Remove Duplicate Vertices**: Merge vertices at same location
-- **Remove Non-Manifold Vertices**: Fix non-manifold topology
+- **Remove Non-Manifold Vertices**: Fix non-manifold topology (recommended)
+- **Remove 3-Face Fans**: Simplify triangulated areas
 - **Remove Isolated Vertices**: Clean up disconnected vertices
 - **Keep Largest Component**: Remove small disconnected pieces
 
-#### Hole Filling Options
-- **Continuity**: Surface smoothness at hole boundary
-  - C⁰: Position continuity (fastest)
-  - C¹: Tangent continuity (recommended)
-  - C²: Curvature continuity (highest quality)
-- **Refine Mesh**: Add vertices to match local density
-- **Max Boundary Vertices**: Maximum hole size to fill
-- **Max Diameter Ratio**: Skip very large holes
+**Presets**:
+- **Light**: Basic cleanup
+- **Full**: Aggressive cleanup (recommended)
 
-#### System Options
-- **Thread Count**: Number of parallel threads (0 = auto)
-- **Memory Limit**: Maximum memory usage
-- **Use Ramdisk**: Use RAM disk for temporary files (Linux)
+### Hole Filling Options
+
+Control the quality and behavior of hole filling:
+
+**Surface Quality**:
+- **Continuity**: Smoothness at hole boundary
+  - C: Position only (fastest)
+  - C: Tangent continuity (recommended)
+  - C: Curvature continuity (highest quality)
+- **Refine Mesh**: Add vertices to match local density
+- **Use Advanced Triangulation**: Better quality (slightly slower)
+
+**Size Limits**:
+- **Max Boundary Vertices**: Maximum hole size to fill (default: 1000)
+- **Max Diameter Ratio**: Skip very large holes (default: 0.1)
+
+**Performance**:
+- **Use Partitioned Filling**: Parallel processing for multiple holes (recommended)
 
 ## Troubleshooting
 
 ### "Engine not found" Error
 
-**Solution**: Set engine path in addon preferences:
-1. Edit → Preferences → Add-ons → Mesh Repair
-2. Set "Engine Path" to `meshrepair_engine` executable
-3. Or click "Detect Engine"
-
-### Operations Do Nothing
-
-**Current Status**: This is a GUI preview version with stub implementations.
-
-**To Enable Full Functionality**:
-1. Build the `meshrepair_engine` wrapper (see ENGINE_CHANGES_REQUIRED.md)
-2. Implement actual operations in `repair_operators.py`
-3. Connect to engine via IPC
+**Solution**:
+1. Download the engine binary from Patreon (link above)
+2. In addon preferences, set "Engine Path" to the downloaded executable
+3. Click "Test Engine" to verify
 
 ### No Holes Detected
 
-**Possible Causes**:
+**Possible causes**:
 - Mesh is already closed (no holes)
 - Holes are larger than size limits
 - Non-manifold geometry preventing detection
 
-**Solution**:
-- Check mesh in Edit mode
+**Solutions**:
+- Check mesh in Edit mode for actual holes
 - Increase "Max Boundary Vertices" limit
-- Enable preprocessing
+- Enable all preprocessing options
 
-## Development Status
+### Repair Produces Weird Results
 
-**Current Version**: 1.0.0 (GUI Preview)
+**Try**:
+- Use "Full" preprocessing preset first
+- Lower continuity level (C instead of C)
+- Disable "Refine Mesh" for problem areas
+- Use "Custom Steps" mode to see intermediate results
 
-**What Works**:
-- ✅ Full GUI with all panels
-- ✅ All settings and properties
-- ✅ Mode selection (Object/Edit)
-- ✅ Selection support
-- ✅ Results display (stub data)
+### Slow Performance
 
-**What Needs Implementation**:
-- ⏳ Engine wrapper (C++)
-- ⏳ Actual mesh export/import
-- ⏳ IPC communication
-- ⏳ Modal operator for progress
-- ⏳ Real-time progress updates
+**Solutions**:
+- Enable "Use Partitioned Filling" for parallel processing
+- Use "Fast" preset for quick results
+- Reduce "Max Boundary Vertices" to skip very large holes
+- Close other applications to free up memory
 
-## Project Structure
+## Results & Statistics
 
-```
-meshrepair_blender/
-├── __init__.py              # Addon registration
-├── preferences.py           # Addon preferences
-├── properties.py            # Scene properties
-├── operators/               # Operator implementations
-│   ├── repair_operators.py  # Main repair operators
-│   ├── utility_operators.py # Helper operators
-│   └── engine_operators.py  # Engine management
-├── ui/                      # User interface
-│   ├── main_panel.py        # Main panel + engine status
-│   └── subpanels.py         # Subpanels (settings, results)
-├── engine/                  # Engine communication
-│   ├── connection.py        # IPC protocol
-│   └── manager.py           # Process management
-└── utils/                   # Utilities
-    └── mesh_utils.py        # Mesh import/export
-```
+After running a repair operation, the **Results & Statistics** panel shows:
+
+**Preprocessing Results**:
+- Duplicates removed
+- Non-manifold vertices fixed
+- Isolated vertices cleaned
+
+**Hole Filling Results**:
+- Holes detected
+- Holes filled successfully
+- Holes failed (too large or complex)
+- Holes skipped (size limits)
+- Vertices/faces added
+
+**Timing Breakdown**:
+- File load time
+- Preprocessing time (with sub-timings)
+- Hole filling time
+- File save time
+- Total time
+
+## Keyboard Shortcuts
+
+While in the Mesh Repair tab:
+- Press **`N`** - Toggle sidebar visibility
+- **`Tab`** - Switch between Object/Edit mode
+- **`Ctrl+Z`** - Undo last operation
+
+## Tips & Best Practices
+
+ **Always preprocess first** - Enable preprocessing for best results
+
+ **Start with Quality preset** - Good balance of speed and quality
+
+ **Use Selection mode** - For repairing specific problem areas
+
+ **Check statistics** - Review results to understand what happened
+
+ **Save before repairing** - Always save your .blend file first
+
+ **Don't repair non-manifold meshes** - Preprocess first to fix topology
+
+ **Don't expect miracles** - Very large or complex holes may fail
+
+## System Requirements
+
+**Minimum**:
+- Blender 3.3+
+- 4GB RAM
+- Dual-core processor
+
+**Recommended**:
+- Blender 4.0+
+- 16GB RAM
+- Quad-core processor or better
+- SSD for faster file I/O
 
 ## License
 
@@ -167,12 +230,13 @@ This program is free software; you can redistribute it and/or modify it under th
 
 - **CGAL**: Computational Geometry Algorithms Library
 - **Liepa 2003**: "Filling Holes in Meshes" algorithm
+- **Blender**: Open source 3D creation suite
 
-## Support
+## Support & Downloads
 
-- **Documentation**: See `MESH_REPAIR_GUI_SPECIFICATION.md`
-- **Implementation Guide**: See `BLENDER_ADDON_IMPLEMENTATION_PLAN.md`
-- **Issues**: Report bugs in the main project repository
+- **Download Engine**: https://www.patreon.com/c/MadProcessor/posts?filters%5Btag%5D=meshrepair
+- **Report Issues**: Use GitHub Issues in the main repository
+- **Documentation**: See INSTALL_INSTRUCTIONS.md for detailed setup
 
 ---
 
