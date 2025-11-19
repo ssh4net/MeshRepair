@@ -13,12 +13,13 @@ mkdir -p build_linux
 cd build_linux
 
 # Configure CMake
-# Adjust CMAKE_PREFIX_PATH to your dependency location
+# Set CMAKE_PREFIX_PATH if dependencies are not in standard locations
+# Add /mnt/e/UBS for nlohmann/json and other header-only libraries
 cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+    -DCMAKE_PREFIX_PATH="/mnt/e/DVS;/mnt/e/UBS" \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_INSTALL_PREFIX=INSTALL \
     -DCMAKE_DEBUG_POSTFIX=d \
-    -DCMAKE_PREFIX_PATH=/mnt/e/UBS \
     ..
 
 if [ $? -ne 0 ]; then
@@ -41,5 +42,5 @@ fi
 
 echo ""
 echo "Build completed successfully!"
-echo "Executable location: build_linux/mesh_hole_filler"
+echo "Executable location: build_linux/meshrepair"
 echo ""
