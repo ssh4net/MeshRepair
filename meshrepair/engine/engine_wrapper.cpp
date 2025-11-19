@@ -1,5 +1,6 @@
 #include "engine_wrapper.h"
 #include "../include/config.h"
+#include "../include/debug_path.h"
 #include <CGAL/IO/PLY.h>
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
 #include <stdexcept>
@@ -58,6 +59,14 @@ namespace Engine {
         thread_config_.verbose     = config.value("verbose", false);
         debug_mode_                = config.value("debug", false);
 
+        if (config.contains("temp_dir")) {
+            std::string temp_dir = config.value("temp_dir", std::string {});
+            MeshRepair::DebugPath::set_base_directory(temp_dir);
+            if (!temp_dir.empty()) {
+                log("info", "Debug output directory: " + MeshRepair::DebugPath::get_base_directory());
+            }
+        }
+
         // Create thread manager
         thread_manager_ = std::make_unique<ThreadManager>(thread_config_);
 
@@ -101,7 +110,7 @@ namespace Engine {
         if (debug_mode_) {
             Mesh debug_mesh;
             PMP::polygon_soup_to_polygon_mesh(soup_->points, soup_->polygons, debug_mesh);
-            std::string filename = "debug_00_original_loaded.ply";
+            std::string filename = MeshRepair::DebugPath::resolve("debug_00_original_loaded.ply");
             if (CGAL::IO::write_PLY(filename, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
                 log("info", "[DEBUG] Saved original soup: " + filename);
             }
@@ -162,7 +171,7 @@ namespace Engine {
             if (debug_mode_) {
                 Mesh debug_mesh;
                 PMP::polygon_soup_to_polygon_mesh(soup_->points, soup_->polygons, debug_mesh);
-                std::string filename = "debug_00_original_loaded.ply";
+            std::string filename = MeshRepair::DebugPath::resolve("debug_00_original_loaded.ply");
                 if (CGAL::IO::write_PLY(filename, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
                     log("info", "[DEBUG] Saved original soup from data: " + filename);
                 }
@@ -553,7 +562,7 @@ namespace Engine {
         }
 
         try {
-            std::string filename = prefix + ".ply";
+            std::string filename = MeshRepair::DebugPath::resolve(prefix + ".ply");
 
             if (CGAL::IO::write_PLY(filename, mesh_.value(), CGAL::parameters::use_binary_mode(true))) {
                 log("info", "[DEBUG] Saved: " + filename);

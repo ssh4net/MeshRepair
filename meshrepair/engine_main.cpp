@@ -1,6 +1,7 @@
 // Engine mode entry point (IPC mode for Blender addon)
 
 #include "include/config.h"
+#include "include/debug_path.h"
 #include "engine/command_handler.h"
 #include "engine/socket_stream.h"
 #include <iostream>
@@ -56,6 +57,7 @@ print_engine_help()
               << "                     2 = verbose (detailed progress)\n"
               << "                     3 = debug (verbose + debug logging)\n"
               << "                     4 = trace (debug + PLY file dumps)\n"
+              << "  --temp-dir PATH   Directory for debug PLY outputs (trace mode)\n"
               << "  --help, -h         Show this help message\n"
               << "\n"
               << "Use Ctrl+C or send 'shutdown' command to exit.\n";
@@ -68,6 +70,7 @@ engine_main(int argc, char** argv)
     // Check for engine-specific options
     int verbosity = 1;  // Default: info level (stats)
     int socket_port = 0;  // 0 = pipe mode, >0 = socket mode
+    std::string temp_dir;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--verbose") == 0 || std::strcmp(argv[i], "-v") == 0) {
@@ -100,6 +103,12 @@ engine_main(int argc, char** argv)
                 std::cerr << "Usage: meshrepair --socket PORT\n";
                 return 1;
             }
+        } else if ((std::strcmp(argv[i], "--temp-dir") == 0 || std::strcmp(argv[i], "--temp") == 0) && i + 1 < argc) {
+            temp_dir = argv[i + 1];
+            ++i;
+        } else if (std::strcmp(argv[i], "--temp-dir") == 0 || std::strcmp(argv[i], "--temp") == 0) {
+            std::cerr << "ERROR: --temp-dir requires a path argument\n";
+            return 1;
         }
         // Skip --engine flag itself
         else if (std::strcmp(argv[i], "--engine") == 0) {
@@ -114,6 +123,10 @@ engine_main(int argc, char** argv)
     bool debug      = (verbosity >= 4);  // PLY file dumps only at level 4
 
     socket_mode = (socket_port > 0);
+
+    if (!temp_dir.empty()) {
+        MeshRepair::DebugPath::set_base_directory(temp_dir);
+    }
 
     // Socket mode
     if (socket_mode) {

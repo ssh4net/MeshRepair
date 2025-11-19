@@ -82,7 +82,7 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
     bl_idname = "meshrepair.preprocess"
     bl_label = "Preprocess Mesh"
     bl_description = "Clean up mesh topology before hole filling"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}
 
     return_result: BoolProperty(
         name="Return Result",
@@ -113,7 +113,8 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
                 verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
-                socket_port=prefs.socket_port
+                socket_port=prefs.socket_port,
+                temp_dir=prefs.temp_dir
             )
 
             # Load mesh via pipe
@@ -135,6 +136,13 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
             self.console_report('INFO', "Preprocessing mesh...")
             response = session.preprocess(options)
 
+            # In batch mode without mesh retrieval, execute queued commands now
+            if session.batch_mode and not self.return_result:
+                session.flush_batch()
+                resolved = session.get_last_response("preprocess")
+                if resolved:
+                    response = resolved
+
             # Extract stats (stats is at root level, not in 'data')
             stats = response.get('stats', {})
             props.last_preprocess_stats = True
@@ -147,6 +155,12 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
             if self.return_result:
                 self.console_report('INFO', "Receiving repaired mesh...")
                 result_mesh_data = session.save_mesh()
+
+                # After executing batch, refresh response with actual stats
+                if session.batch_mode:
+                    resolved = session.get_last_response("preprocess")
+                    if resolved:
+                        response = resolved
 
                 self.console_report('INFO', "Importing result...")
                 import_mesh_from_data(result_mesh_data, obj, replace=True)
@@ -180,7 +194,7 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
     bl_idname = "meshrepair.detect_holes"
     bl_label = "Detect Holes"
     bl_description = "Find all holes in the mesh"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}
 
     return_result: BoolProperty(
         name="Return Result",
@@ -210,22 +224,33 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
                 verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
-                socket_port=prefs.socket_port
+                socket_port=prefs.socket_port,
+                temp_dir=prefs.temp_dir
             )
 
             # Load mesh via pipe
             self.report({'INFO'}, "Loading mesh into engine...")
             session.load_mesh(mesh_data)
 
-            # Build detection options
+            # Build detection options (send both legacy and current keys)
+            max_boundary = props.filling_max_boundary
+            max_diameter = props.filling_max_diameter_ratio
             options = {
-                "max_hole_boundary_vertices": props.filling_max_boundary,
-                "max_hole_diameter_ratio": props.filling_max_diameter_ratio
+                "max_boundary": max_boundary,
+                "max_hole_boundary_vertices": max_boundary,
+                "max_diameter": max_diameter,
+                "max_hole_diameter_ratio": max_diameter
             }
 
             # Detect holes
             self.console_report('INFO', "Detecting holes...")
             response = session.detect_holes(options)
+
+            if session.batch_mode:
+                session.flush_batch()
+                resolved = session.get_last_response("detect_holes")
+                if resolved:
+                    response = resolved
 
             # Extract stats (stats is at root level)
             hole_stats = response.get('stats', {})
@@ -260,7 +285,7 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
     bl_idname = "meshrepair.fill_holes"
     bl_label = "Fill Holes"
     bl_description = "Fill all detected holes in the mesh"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}
 
     def execute(self, context):
         if not self.check_engine():
@@ -284,7 +309,8 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
                 verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
-                socket_port=prefs.socket_port
+                socket_port=prefs.socket_port,
+                temp_dir=prefs.temp_dir
             )
 
             # Load mesh via pipe
@@ -292,20 +318,35 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
             session.load_mesh(mesh_data)
 
             # Build filling options
+            max_boundary = props.filling_max_boundary
+            max_diameter = props.filling_max_diameter_ratio
             options = {
                 "continuity": int(props.filling_continuity),
+                "refine": props.filling_refine,
                 "refine_result": props.filling_refine,
                 "use_2d_cdt": props.filling_use_2d_cdt,
                 "use_3d_delaunay": props.filling_use_3d_delaunay,
+                "skip_cubic": props.filling_skip_cubic,
                 "skip_cubic_solver": props.filling_skip_cubic,
                 "use_partitioned": props.filling_use_partitioned,
-                "max_hole_boundary_vertices": props.filling_max_boundary,
-                "max_hole_diameter_ratio": props.filling_max_diameter_ratio
+                "max_boundary": max_boundary,
+                "max_hole_boundary_vertices": max_boundary,
+                "max_diameter": max_diameter,
+                "max_hole_diameter_ratio": max_diameter
             }
 
             # Fill holes
             self.console_report('INFO', "Filling holes...")
             response = session.fill_holes(options)
+
+            # Get result and import via pipe
+            self.console_report('INFO', "Receiving repaired mesh...")
+            result_mesh_data = session.save_mesh()
+
+            if session.batch_mode:
+                resolved = session.get_last_response("fill_holes")
+                if resolved:
+                    response = resolved
 
             # Extract stats (stats is at root level)
             hole_stats = response.get('stats', {})
@@ -317,10 +358,6 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
             props.last_holes_skipped = hole_stats.get('num_holes_skipped', 0)
             props.last_vertices_added = hole_stats.get('total_vertices_added', 0)
             props.last_faces_added = hole_stats.get('total_faces_added', 0)
-
-            # Get result and import via pipe
-            self.console_report('INFO', "Receiving repaired mesh...")
-            result_mesh_data = session.save_mesh()
 
             self.console_report('INFO', "Importing result...")
             import_mesh_from_data(result_mesh_data, obj, replace=True)
@@ -353,7 +390,7 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
     bl_idname = "meshrepair.repair_all"
     bl_label = "Repair All"
     bl_description = "Full repair pipeline with quality preset"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}
 
     preset: EnumProperty(
         name="Preset",
@@ -402,7 +439,8 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
                 verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
-                socket_port=prefs.socket_port
+                socket_port=prefs.socket_port,
+                temp_dir=prefs.temp_dir
             )
 
             # Load mesh via pipe
@@ -410,6 +448,7 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
             session.load_mesh(mesh_data)
 
             # Preprocessing (if enabled)
+            preprocess_response = None
             if props.enable_preprocessing:
                 preprocess_options = {
                     "remove_duplicates": props.preprocess_remove_duplicates,
@@ -423,34 +462,56 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
 
                 self.console_report('INFO', "Preprocessing mesh...")
                 preprocess_response = session.preprocess(preprocess_options)
-
-                # Extract preprocessing stats (stats is at root level)
-                preprocess_stats = preprocess_response.get('stats', {})
-                props.last_preprocess_stats = True
-                props.last_duplicate_count = preprocess_stats.get('duplicates_merged', 0)
-                props.last_non_manifold_count = preprocess_stats.get('non_manifold_vertices_removed', 0)
-                props.last_3_face_fan_count = preprocess_stats.get('face_fans_collapsed', 0)
-                props.last_isolated_count = preprocess_stats.get('isolated_vertices_removed', 0)
             else:
                 props.last_preprocess_stats = False
 
             # Build filling options
+            max_boundary = props.filling_max_boundary
+            max_diameter = props.filling_max_diameter_ratio
             filling_options = {
                 "continuity": int(props.filling_continuity),
+                "refine": props.filling_refine,
                 "refine_result": props.filling_refine,
                 "use_2d_cdt": props.filling_use_2d_cdt,
                 "use_3d_delaunay": props.filling_use_3d_delaunay,
+                "skip_cubic": props.filling_skip_cubic,
                 "skip_cubic_solver": props.filling_skip_cubic,
                 "use_partitioned": props.filling_use_partitioned,
-                "max_hole_boundary_vertices": props.filling_max_boundary,
-                "max_hole_diameter_ratio": props.filling_max_diameter_ratio
+                "max_boundary": max_boundary,
+                "max_hole_boundary_vertices": max_boundary,
+                "max_diameter": max_diameter,
+                "max_hole_diameter_ratio": max_diameter
             }
 
             # Fill holes
             self.console_report('INFO', "Filling holes...")
             fill_response = session.fill_holes(filling_options)
 
-            # Extract filling stats (stats is at root level)
+            # Get result and import via pipe
+            self.console_report('INFO', "Receiving repaired mesh...")
+            result_mesh_data = session.save_mesh()
+
+            if session.batch_mode:
+                resolved_fill = session.get_last_response("fill_holes")
+                if resolved_fill:
+                    fill_response = resolved_fill
+                if props.enable_preprocessing:
+                    resolved_pre = session.get_last_response("preprocess")
+                    if resolved_pre:
+                        preprocess_response = resolved_pre
+
+            self.console_report('INFO', "Importing result...")
+            import_mesh_from_data(result_mesh_data, obj, replace=True)
+
+            if props.enable_preprocessing and preprocess_response:
+                preprocess_stats = preprocess_response.get('stats', {})
+                props.last_preprocess_stats = True
+                props.last_duplicate_count = preprocess_stats.get('duplicates_merged', 0)
+                props.last_non_manifold_count = preprocess_stats.get('non_manifold_vertices_removed', 0)
+                props.last_3_face_fan_count = preprocess_stats.get('face_fans_collapsed', 0)
+                props.last_isolated_count = preprocess_stats.get('isolated_vertices_removed', 0)
+
+            # Update props
             hole_stats = fill_response.get('stats', {})
             props.last_hole_stats = True
             props.last_holes_detected = hole_stats.get('num_holes_detected', 0)
@@ -460,14 +521,6 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
             props.last_vertices_added = hole_stats.get('total_vertices_added', 0)
             props.last_faces_added = hole_stats.get('total_faces_added', 0)
 
-            # Get result and import via pipe
-            self.console_report('INFO', "Receiving repaired mesh...")
-            result_mesh_data = session.save_mesh()
-
-            self.console_report('INFO', "Importing result...")
-            import_mesh_from_data(result_mesh_data, obj, replace=True)
-
-            # Update props
             elapsed_time = (time.time() - start_time) * 1000
             props.has_results = True
             props.last_operation_type = f"Repair All ({self.preset})"

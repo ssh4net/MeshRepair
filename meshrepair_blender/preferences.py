@@ -46,32 +46,12 @@ class MeshRepairPreferences(AddonPreferences):
         max=64
     )
 
-    memory_limit_gb: IntProperty(
-        name="Memory Limit (GB)",
-        description="Maximum memory usage for engine",
-        default=16,
-        min=1,
-        max=256
-    )
-
-    use_ramdisk: BoolProperty(
-        name="Use Ramdisk",
-        description="Use RAM disk for temporary files (faster I/O)",
-        default=False
-    )
-
     # Advanced
     temp_dir: StringProperty(
-        name="Temp Directory",
-        description="Directory for temporary files",
+        name="Debug Output Directory",
+        description="Directory for engine debug outputs (PLY dumps)",
         default="",
         subtype='DIR_PATH'
-    )
-
-    keep_temp_files: BoolProperty(
-        name="Keep Temp Files",
-        description="Don't delete temporary files (for debugging)",
-        default=False
     )
 
     verbosity_level: EnumProperty(
@@ -138,21 +118,11 @@ class MeshRepairPreferences(AddonPreferences):
         # Performance
         layout.separator()
         col = layout.column(align=True)
-        col.label(text="Performance:", icon='SETTINGS')
+        col.label(text="Engine Options:", icon='SETTINGS')
 
         box = col.box()
         box_col = box.column(align=True)
         box_col.prop(self, "thread_count")
-        box_col.prop(self, "memory_limit_gb")
-        box_col.prop(self, "use_ramdisk")
-
-        # Advanced
-        layout.separator()
-        col = layout.column(align=True)
-        col.label(text="Advanced:", icon='PREFERENCES')
-
-        box = col.box()
-        box_col = box.column(align=True)
         box_col.prop(self, "verbosity_level")
 
         # Warning for trace mode (PLY dumps)
@@ -161,12 +131,10 @@ class MeshRepairPreferences(AddonPreferences):
             warning_col = warning_box.column(align=True)
             warning_col.alert = True
             warning_col.label(text="WARNING: Trace mode enabled", icon='ERROR')
-            warning_col.label(text="PLY files will be written to Blender app folder:")
-            warning_col.label(text=f"  {bpy.app.binary_path_python.rsplit(os.sep, 2)[0]}")
+            warning_col.label(text="PLY files will be written to temp folder")
             warning_col.label(text="This can consume significant disk space!")
 
         box_col.prop(self, "temp_dir")
-        box_col.prop(self, "keep_temp_files")
 
         # Socket Mode (debugging only)
         layout.separator()

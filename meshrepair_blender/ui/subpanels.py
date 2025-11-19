@@ -115,6 +115,7 @@ class MESHREPAIR_PT_Results(MESHREPAIR_PT_SubPanel):
     """Results and statistics panel"""
     bl_idname = 'MESHREPAIR_PT_Results'
     bl_label = 'Results & Statistics'
+    bl_parent_id = 'MESHREPAIR_PT_EngineStatus'
 
     @classmethod
     def poll(cls, context):

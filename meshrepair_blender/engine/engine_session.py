@@ -31,7 +31,8 @@ class EngineSession:
     2. Batch mode (pipe): One-way write-once pattern (UVPackmaster style)
     """
 
-    def __init__(self, engine_path, verbosity=1, socket_mode=False, socket_host="localhost", socket_port=9876, batch_mode=None):
+    def __init__(self, engine_path, verbosity=1, socket_mode=False, socket_host="localhost", socket_port=9876,
+                 batch_mode=None, temp_dir=""):
         """
         Initialize engine session.
 
@@ -48,6 +49,22 @@ class EngineSession:
         self.mesh_loaded = False
         self.verbosity = verbosity
         self.log_file_path = None
+
+        resolved_temp = (temp_dir or "").strip()
+        if not resolved_temp and self.verbosity >= 4:
+            resolved_temp = tempfile.gettempdir()
+        if resolved_temp:
+            resolved_temp = os.path.expanduser(resolved_temp)
+            try:
+                import bpy  # pylint: disable=import-outside-toplevel
+                resolved_temp = bpy.path.abspath(resolved_temp)
+            except Exception:
+                resolved_temp = os.path.abspath(resolved_temp)
+            try:
+                os.makedirs(resolved_temp, exist_ok=True)
+            except OSError:
+                pass
+        self.temp_dir = resolved_temp
 
         # Auto-detect batch mode: use batch for pipe mode, interactive for socket mode
         if batch_mode is None:
@@ -83,6 +100,39 @@ class EngineSession:
                 raise RuntimeError(f"{cmd['command']} failed: {response.get('error', {}).get('message', 'Unknown error')}")
             return response
 
+    def flush_batch(self):
+        """
+        Execute queued commands in batch mode if any remain.
+
+        Returns:
+            list: Responses returned by the engine (empty if nothing executed)
+        """
+        if not self.batch_mode:
+            return []
+
+        if not self.command_queue:
+            return []
+
+        return self.execute_batch()
+
+    def get_last_response(self, command_name):
+        """
+        Retrieve the most recent response for a given command from the last batch.
+
+        Args:
+            command_name (str): Command identifier to search for.
+
+        Returns:
+            dict or None: Command response if available.
+        """
+        if not self.response_queue:
+            return None
+
+        for entry in reversed(self.response_queue):
+            if entry.get('command') == command_name:
+                return entry.get('response')
+        return None
+
     def start(self):
         """Start engine process."""
         self.manager.start()
@@ -106,6 +156,8 @@ class EngineSession:
                 "log_file_path": log_path  # File logging for debugging
             }
         }
+        if self.temp_dir:
+            init_cmd["params"]["temp_dir"] = self.temp_dir
 
         if self.batch_mode:
             # Batch mode: queue command instead of sending
@@ -312,19 +364,20 @@ class EngineSession:
         }
 
         if self.batch_mode:
-            # Batch mode: queue command, execute batch, extract mesh from last response
+            # Batch mode: queue command, execute batch, extract mesh from recorded response
             self.command_queue.append(cmd)
 
             # Execute the entire batch
             responses = self.execute_batch()
 
-            # Find save_mesh response (should be the last one)
-            save_response = None
-            for response in reversed(responses):
-                if response.get('type') != 'error':
-                    # Check if this response has mesh data
-                    if 'mesh_data_binary' in response:
-                        save_response = response
+            # Prefer mapped response (includes command name)
+            save_response = self.get_last_response("save_mesh")
+
+            # Fallback: search raw responses for mesh payload
+            if not save_response:
+                for response_entry in reversed(responses):
+                    if response_entry.get('type') != 'error' and 'mesh_data_binary' in response_entry:
+                        save_response = response_entry
                         break
 
             if not save_response:
@@ -405,12 +458,17 @@ class EngineSession:
 
         # Read responses (one for each command)
         responses = []
+        paired_responses = []
         for i, cmd in enumerate(self.command_queue):
             cmd_name = cmd.get('command', 'unknown')
             print(f"[MeshRepair INFO] Waiting for response {i+1}/{len(self.command_queue)}: {cmd_name}")
 
             response = self.manager.read_response(timeout=120.0)
             responses.append(response)
+            paired_responses.append({
+                "command": cmd_name,
+                "response": response
+            })
 
             # Check for errors
             if response.get('type') == 'error':
@@ -429,7 +487,7 @@ class EngineSession:
 
         # Clear command queue
         self.command_queue = []
-        self.response_queue = responses
+        self.response_queue = paired_responses
 
         # In batch mode, terminate the engine process now that we have all responses
         # The engine is waiting indefinitely for termination (keeps stdout pipe open)

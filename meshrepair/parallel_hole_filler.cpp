@@ -4,6 +4,7 @@
 #include <chrono>
 #include <sstream>
 #include <iomanip>
+#include "debug_path.h"
 
 namespace MeshRepair {
 
@@ -26,7 +27,7 @@ ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug)
 
     // Debug: Save original mesh before partitioning
     if (debug) {
-        std::string debug_file = "debug_06_partition_input.ply";
+        std::string debug_file = MeshRepair::DebugPath::resolve("debug_06_partition_input.ply");
         if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
             if (verbose) {
                 std::cout << "  [DEBUG] Saved original mesh: " << debug_file << "\n";
@@ -117,7 +118,7 @@ ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug)
         for (size_t i = 0; i < submeshes.size(); ++i) {
             std::ostringstream oss;
             oss << "debug_06_partition_" << std::setw(3) << std::setfill('0') << i << "_unfilled.ply";
-            std::string debug_file = oss.str();
+            std::string debug_file = MeshRepair::DebugPath::resolve(oss.str());
 
             if (CGAL::IO::write_PLY(debug_file, submeshes[i].mesh, CGAL::parameters::use_binary_mode(true))) {
                 if (verbose) {
@@ -164,7 +165,7 @@ ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug)
         for (size_t i = 0; i < filled_submeshes.size(); ++i) {
             std::ostringstream oss;
             oss << "debug_07_partition_" << std::setw(3) << std::setfill('0') << i << "_filled.ply";
-            std::string debug_file = oss.str();
+            std::string debug_file = MeshRepair::DebugPath::resolve(oss.str());
 
             if (CGAL::IO::write_PLY(debug_file, filled_submeshes[i].mesh, CGAL::parameters::use_binary_mode(true))) {
                 if (verbose) {
@@ -191,7 +192,7 @@ ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug)
 
     // Debug: Save final merged mesh
     if (debug) {
-        std::string debug_file = "debug_08_final_merged.ply";
+        std::string debug_file = MeshRepair::DebugPath::resolve("debug_08_final_merged.ply");
         if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
             if (verbose) {
                 std::cout << "  [DEBUG] Saved final merged mesh: " << debug_file << "\n";

@@ -86,7 +86,8 @@ class MESHREPAIR_OT_test_engine(Operator):
                 verbosity=int(prefs.verbosity_level),
                 socket_mode=prefs.use_socket_mode,
                 socket_host=prefs.socket_host,
-                socket_port=prefs.socket_port
+                socket_port=prefs.socket_port,
+                temp_dir=prefs.temp_dir
             )
             info = session.test()
             session.stop()

@@ -217,6 +217,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/main.cpp
     meshrepair/cli_main.cpp
     meshrepair/engine_main.cpp
+    meshrepair/debug_path.cpp
     meshrepair/engine/protocol.cpp
     meshrepair/engine/engine_wrapper.cpp
     meshrepair/engine/command_handler.cpp
@@ -262,6 +263,7 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/mesh_merger.h
     meshrepair/include/parallel_hole_filler.h
     meshrepair/include/thread_safe_cout.h
+    meshrepair/include/debug_path.h
 )
 
 # Main executable

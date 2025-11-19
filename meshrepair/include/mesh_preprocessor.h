@@ -55,7 +55,8 @@ public:
     static PreprocessingStats preprocess_soup(PolygonSoup& soup, Mesh& output_mesh,
                                               const PreprocessingOptions& options = PreprocessingOptions());
 
-    static void plyDump(MeshRepair::PolygonSoup& soup, const std::string debug_file, const std::string message);
+    static void plyDump(MeshRepair::PolygonSoup& soup, const std::string debug_file, const std::string message,
+                        bool verbose);
 
     // Individual preprocessing operations (mesh-level only)
     size_t remove_isolated_vertices();

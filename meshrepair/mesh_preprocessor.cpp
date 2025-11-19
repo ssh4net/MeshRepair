@@ -9,6 +9,7 @@
 #include <CGAL/boost/graph/Euler_operations.h>
 #include <CGAL/boost/graph/helpers.h>
 #include <CGAL/IO/PLY.h>
+#include "debug_path.h"
 #include <iostream>
 #include <chrono>
 #include <vector>
@@ -85,7 +86,7 @@ MeshPreprocessor::preprocess()
         polygons.push_back(std::move(polygon));  // Move to avoid copy
     }
 
-    if (options_.debug) {
+    if (options_.debug && options_.verbose) {
         std::cout << "  [DEBUG] Extracted soup: " << points.size() << " points, " << polygons.size() << " polygons\n";
     }
 
@@ -109,7 +110,7 @@ MeshPreprocessor::preprocess()
         size_t polygons_before = polygons.size();
         PMP::merge_duplicate_polygons_in_polygon_soup(points, polygons);
 
-        if (options_.debug && polygons_before > polygons.size()) {
+        if (options_.debug && options_.verbose && polygons_before > polygons.size()) {
             std::cout << "  [DEBUG] Removed " << (polygons_before - polygons.size()) << " duplicate polygons\n";
         }
     }
@@ -169,13 +170,15 @@ MeshPreprocessor::preprocess()
 
         // Debug: Save mesh after fan removal
         if (options_.debug) {
-            std::string debug_file = "debug_04_after_3_face_fans.ply";
+            std::string debug_file = MeshRepair::DebugPath::resolve("debug_04_after_3_face_fans.ply");
             Mesh debug_mesh;
             PMP::polygon_soup_to_polygon_mesh(points, polygons, debug_mesh);
             if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
-                std::cout << "  [DEBUG] Saved soup (after 3-face fans): " << debug_file << "\n";
-                std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
-                          << debug_mesh.number_of_faces() << " faces\n";
+                if (options_.verbose) {
+                    std::cout << "  [DEBUG] Saved soup (after 3-face fans): " << debug_file << "\n";
+                    std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
+                              << debug_mesh.number_of_faces() << " faces\n";
+                }
             }
         }
     }
@@ -187,14 +190,16 @@ MeshPreprocessor::preprocess()
 
     // Debug: Save soup BEFORE orient
     if (options_.debug) {
-        std::string debug_file = "debug_05_preprocess_soup_before_orient.ply";
+        std::string debug_file = MeshRepair::DebugPath::resolve("debug_05_preprocess_soup_before_orient.ply");
         Mesh debug_mesh;
         PMP::polygon_soup_to_polygon_mesh(points, polygons, debug_mesh);
 
         if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
-            std::cout << "  [DEBUG] Saved soup (before orient): " << debug_file << "\n";
-            std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
-                      << debug_mesh.number_of_faces() << " faces\n";
+            if (options_.verbose) {
+                std::cout << "  [DEBUG] Saved soup (before orient): " << debug_file << "\n";
+                std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
+                          << debug_mesh.number_of_faces() << " faces\n";
+            }
         }
     }
 
@@ -223,7 +228,7 @@ MeshPreprocessor::preprocess()
 
     // Debug: Save mesh after soup conversion
     if (options_.debug) {
-        std::string debug_file = "debug_06_after_soup_cleanup.ply";
+        std::string debug_file = MeshRepair::DebugPath::resolve("debug_06_after_soup_cleanup.ply");
         if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
             if (options_.verbose) {
                 std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -254,7 +259,7 @@ MeshPreprocessor::preprocess()
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_07_after_isolated.ply";
+            std::string debug_file = MeshRepair::DebugPath::resolve("debug_07_after_isolated.ply");
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -279,7 +284,7 @@ MeshPreprocessor::preprocess()
             if (mesh_.has_garbage()) {
                 mesh_.collect_garbage();
             }
-            std::string debug_file = "debug_08_after_components.ply";
+            std::string debug_file = MeshRepair::DebugPath::resolve("debug_08_after_components.ply");
             if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
                 if (options_.verbose) {
                     std::cout << "  [DEBUG] Saved: " << debug_file << "\n\n";
@@ -454,7 +459,7 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     if (options.remove_duplicates) {
         size_t polygons_before = soup.polygons.size();
         PMP::merge_duplicate_polygons_in_polygon_soup(soup.points, soup.polygons);
-        if (options.debug && polygons_before > soup.polygons.size()) {
+        if (options.debug && options.verbose && polygons_before > soup.polygons.size()) {
             std::cout << "  [DEBUG] Removed " << (polygons_before - soup.polygons.size()) << " duplicate polygons\n";
         }
     }
@@ -476,7 +481,8 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     }
 
     if (options.debug)
-        MeshPreprocessor::plyDump(soup, "debug_02_after_removal.ply", "Saved soup (after degenerate removal)");
+        MeshPreprocessor::plyDump(soup, "debug_02_after_removal.ply", "Saved soup (after degenerate removal)",
+                                  options.verbose);
 
     //
     // Step 1.4: Remove non-manifold vertices/edges
@@ -498,7 +504,8 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     }
 
     if (options.debug)
-        MeshPreprocessor::plyDump(soup, "debug_04_non_manifold_removal.ply", "Saved soup (after non-manifold removal)");
+        MeshPreprocessor::plyDump(soup, "debug_04_non_manifold_removal.ply", "Saved soup (after non-manifold removal)",
+                                  options.verbose);
 
     //
     // Step 1.5: Remove 3-face fans
@@ -514,7 +521,8 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     }
 
     if (options.debug)
-        MeshPreprocessor::plyDump(soup, "debug_05_after_3_face_fans.ply", "Saved soup (after 3-face fans)");
+        MeshPreprocessor::plyDump(soup, "debug_05_after_3_face_fans.ply", "Saved soup (after 3-face fans)",
+                                  options.verbose);
 
     //
     // Step 1.6: Orient polygon soup
@@ -660,14 +668,18 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
 }
 
 void
-MeshPreprocessor::plyDump(MeshRepair::PolygonSoup& soup, const std::string debug_file, const std::string message)
+MeshPreprocessor::plyDump(MeshRepair::PolygonSoup& soup, const std::string debug_file, const std::string message,
+                          bool verbose)
 {
     Mesh debug_mesh;
     PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);
-    if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL ::parameters::use_binary_mode(true))) {
-        std::cout << "  [DEBUG] " << message << " : " << debug_file << "\n ";
-        std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
-                  << debug_mesh.number_of_faces() << " faces\n";
+    auto resolved = MeshRepair::DebugPath::resolve(debug_file);
+    if (CGAL::IO::write_PLY(resolved, debug_mesh, CGAL ::parameters::use_binary_mode(true))) {
+        if (verbose) {
+            std::cout << "  [DEBUG] " << message << " : " << resolved << "\n ";
+            std::cout << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
+                      << debug_mesh.number_of_faces() << " faces\n";
+        }
     }
 }
 

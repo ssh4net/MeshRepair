@@ -15,7 +15,6 @@ Direct data import (no temp files).
 """
 
 import bpy
-import bmesh
 
 
 def import_mesh_from_data(mesh_data, target_obj, replace=True):
@@ -39,51 +38,41 @@ def import_mesh_from_data(mesh_data, target_obj, replace=True):
         vertices = mesh_data['vertices']
         faces = mesh_data['faces']
 
-        # Create bmesh from data
-        bm = bmesh.new()
-
-        # Add vertices
-        bm_verts = []
-        for v in vertices:
-            bm_verts.append(bm.verts.new((v[0], v[1], v[2])))
-
-        # Ensure lookup table
-        bm.verts.ensure_lookup_table()
-
-        # Add faces
-        for face_indices in faces:
-            try:
-                face_verts = [bm_verts[i] for i in face_indices]
-                bm.faces.new(face_verts)
-            except (ValueError, IndexError):
-                # Skip degenerate or invalid faces
-                pass
-
         if replace:
-            # Replace existing mesh data
-            if target_obj.mode == 'EDIT':
-                bmesh.update_edit_mesh(target_obj.data)
-                bm_edit = bmesh.from_edit_mesh(target_obj.data)
-                bm_edit.clear()
+            view_layer = bpy.context.view_layer
+            previous_active = view_layer.objects.active
+            previous_mode = target_obj.mode
 
-                # Copy data from bm to bm_edit
-                for v in bm.verts:
-                    bm_edit.verts.new(v.co)
-                bm_edit.verts.ensure_lookup_table()
+            try:
+                # Ensure target object is active and in object mode for safe data edits
+                if previous_active is not target_obj:
+                    view_layer.objects.active = target_obj
+                previous_selection = target_obj.select_get()
+                if not target_obj.select_get():
+                    target_obj.select_set(True)
+                if previous_mode != 'OBJECT':
+                    bpy.ops.object.mode_set(mode='OBJECT')
 
-                for f in bm.faces:
-                    face_verts = [bm_edit.verts[v.index] for v in f.verts]
-                    try:
-                        bm_edit.faces.new(face_verts)
-                    except ValueError:
-                        pass
-
-                bmesh.update_edit_mesh(target_obj.data)
-            else:
-                bm.to_mesh(target_obj.data)
-                target_obj.data.update()
-
-        bm.free()
+                mesh = target_obj.data
+                mesh.clear_geometry()
+                mesh.from_pydata(vertices, [], faces)
+                mesh.validate(verbose=False)
+                mesh.update(calc_edges=True, calc_edges_loose=True)
+            finally:
+                # Restore original mode and active object
+                if previous_mode != 'OBJECT':
+                    bpy.ops.object.mode_set(mode=previous_mode)
+                if 'previous_selection' in locals() and not previous_selection:
+                    target_obj.select_set(False)
+                if previous_active is not None and previous_active is not target_obj:
+                    view_layer.objects.active = previous_active
+        else:
+            # Create new mesh datablock and assign to target object
+            new_mesh = bpy.data.meshes.new(name=f"{target_obj.name}_repaired")
+            new_mesh.from_pydata(vertices, [], faces)
+            new_mesh.validate(verbose=False)
+            new_mesh.update(calc_edges=True, calc_edges_loose=True)
+            target_obj.data = new_mesh
 
         return target_obj
 

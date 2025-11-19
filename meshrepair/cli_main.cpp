@@ -8,6 +8,7 @@
 #include "pipeline_processor.h"
 #include "parallel_hole_filler.h"
 #include "config.h"
+#include "debug_path.h"
 
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
 #include <CGAL/IO/PLY.h>
@@ -70,6 +71,7 @@ print_usage(const char* program_name)
               << "                         4 = trace (debug + PLY file dumps)\n"
               << "  --validate             Validate mesh before/after\n"
               << "  --ascii-ply            Save PLY in ASCII format (default: binary)\n"
+              << "  --temp-dir <path>      Directory for debug PLY dumps (default: CWD)\n"
               << "\n"
               << "Preprocessing:\n"
               << "  --preprocess           Enable all preprocessing steps\n"
@@ -119,6 +121,9 @@ struct CommandLineArgs {
 
     // Loader options
     bool force_cgal_loader = false;  // Force CGAL OBJ loader instead of RapidOBJ
+
+    // Debug/temp options
+    std::string temp_dir;
 
     bool parse(int argc, char** argv)
     {
@@ -173,6 +178,8 @@ struct CommandLineArgs {
                 validate = true;
             } else if (arg == "--ascii-ply") {
                 ascii_ply = true;
+            } else if ((arg == "--temp-dir" || arg == "--temp") && i + 1 < argc) {
+                temp_dir = argv[++i];
             } else if (arg == "--preprocess") {
                 enable_preprocessing = true;
             } else if (arg == "--no-remove-duplicates") {
@@ -221,6 +228,10 @@ cli_main(int argc, char** argv)
     if (!args.parse(argc, argv)) {
         print_usage(argv[0]);
         return (argc < 3) ? 1 : 0;  // Return 0 for --help, 1 for parse error
+    }
+
+    if (!args.temp_dir.empty()) {
+        DebugPath::set_base_directory(args.temp_dir);
     }
 
     // Start total timing
@@ -274,7 +285,7 @@ cli_main(int argc, char** argv)
     if (args.enable_preprocessing) {
         // Debug: Save original loaded soup before any preprocessing
         if (debug) {
-            std::string debug_file = "debug_00_original_loaded.ply";
+            std::string debug_file = DebugPath::resolve("debug_00_original_loaded.ply");
             // Convert soup to temporary mesh for debug output
             Mesh debug_mesh;
             PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);

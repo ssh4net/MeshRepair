@@ -217,7 +217,6 @@ namespace Engine {
         // Force verbose/debug flags off to prevent std::cout prints (e.g. ThreadManager).
         if (!socket_mode_) {
             init_params["verbose"] = false;
-            init_params["debug"]   = false;
         }
 
         engine_.initialize(init_params);
