@@ -9,6 +9,7 @@
 #include "parallel_hole_filler.h"
 #include "config.h"
 #include "debug_path.h"
+#include "help_printer.h"
 
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
 #include <CGAL/IO/PLY.h>
@@ -21,82 +22,6 @@ using namespace MeshRepair;
 
 namespace PMP = CGAL::Polygon_mesh_processing;
 
-
-void
-print_usage(const char* program_name)
-{
-    std::cout << "\n"
-              << "MeshRepair v" << Config::VERSION << "\n"
-              << "Built: " << Config::BUILD_DATE << " " << Config::BUILD_TIME << "\n"
-              << "Mesh hole filling tool (Liepa 2003 with Laplacian fairing)\n\n"
-              << "Usage: " << program_name << " <input> <output> [options]\n\n"
-              << "\n"
-              << "Usage:\n"
-              << "  CLI mode:    meshrepair <input> <output> [options]\n"
-              << "  Engine mode: meshrepair --engine [--verbose]\n"
-              << "\n"
-              << "CLI Mode:\n"
-              << "  Traditional command-line mesh repair tool.\n"
-              << "  Use --help for detailed CLI options.\n"
-              << "\n"
-              << "Engine Mode:\n"
-              << "  Runs as IPC engine, communicating via stdin/stdout.\n"
-              << "  Used by Blender addon and other integrations.\n"
-              << "  Protocol: Binary-framed JSON messages\n"
-              << "\n"
-              << "Options:\n"
-              << "  --help, -h    Show this help message\n"
-              << "\n"
-              << "Examples:\n"
-              << "  meshrepair input.obj output.obj --continuity 1\n"
-              << "  meshrepair --engine\n"
-              << "  meshrepair --engine --verbose\n"
-              << "Arguments:\n"
-              << "  input                  Input mesh file (.obj, .ply, .off)\n"
-              << "  output                 Output mesh file (.obj, .ply, .off)\n\n"
-              << "Options:\n"
-              << "  --continuity <0|1|2>   Fairing continuity (default: 1)\n"
-              << "                         0 = C0, 1 = C1, 2 = C2\n"
-              << "  --max-boundary <n>     Max hole boundary vertices (default: 1000)\n"
-              << "  --max-diameter <r>     Max hole diameter ratio (default: 0.1)\n"
-              << "  --no-2d-cdt            Disable 2D constrained Delaunay\n"
-              << "  --no-3d-delaunay       Disable 3D Delaunay fallback\n"
-              << "  --skip-cubic           Skip cubic search (faster but less robust)\n"
-              << "  --no-refine            Disable mesh refinement\n"
-              << "  -v, --verbose <level>  Verbosity level (default: 1)\n"
-              << "                         0 = quiet (minimal output)\n"
-              << "                         1 = info (timing statistics)\n"
-              << "                         2 = verbose (detailed progress)\n"
-              << "                         3 = debug (verbose + debug logging)\n"
-              << "                         4 = trace (debug + PLY file dumps)\n"
-              << "  --validate             Validate mesh before/after\n"
-              << "  --ascii-ply            Save PLY in ASCII format (default: binary)\n"
-              << "  --temp-dir <path>      Directory for debug PLY dumps (default: CWD)\n"
-              << "\n"
-              << "Preprocessing:\n"
-              << "  --preprocess           Enable all preprocessing steps\n"
-              << "  --no-remove-duplicates Disable duplicate vertex removal\n"
-              << "  --no-remove-non-manifold Disable non-manifold vertex removal\n"
-              << "  --no-remove-3facefan   Disable 3-face fan collapsing\n"
-              << "  --no-remove-isolated   Disable isolated vertex removal\n"
-              << "  --no-remove-small      Disable small component removal\n"
-              << "  --non-manifold-passes <n> Number of non-manifold removal passes (default: 2)\n"
-              << "\n"
-              << "Threading:\n"
-              << "  --threads <n>          Number of worker threads (default: hw_cores/2, 0 = auto)\n"
-              << "  --queue-size <n>       Pipeline queue size in holes (default: 10, legacy mode only)\n"
-              << "  --no-partition         Disable partitioned parallel filling (use legacy mode)\n"
-              << "\n"
-              << "Loader:\n"
-              << "  --cgal-loader          Force CGAL OBJ loader (default: RapidOBJ if available)\n"
-              << "\n"
-              << "  --help                 Show this help message\n\n"
-              << "Examples:\n"
-              << "  " << program_name << " input.obj output.obj\n"
-              << "  " << program_name << " mesh.ply repaired.ply --verbose --stats\n"
-              << "  " << program_name << " model.obj fixed.obj --continuity 2 --max-boundary 500\n\n";
-}
-
 struct CommandLineArgs {
     std::string input_file;
     std::string output_file;
@@ -106,7 +31,7 @@ struct CommandLineArgs {
     bool ascii_ply  = false;  // Use ASCII PLY instead of binary
 
     // Preprocessing options
-    bool enable_preprocessing              = false;
+    bool enable_preprocessing              = true;
     bool preprocess_remove_duplicates      = true;
     bool preprocess_remove_non_manifold    = true;
     bool preprocess_remove_3_face_fans     = true;
@@ -180,8 +105,10 @@ struct CommandLineArgs {
                 ascii_ply = true;
             } else if ((arg == "--temp-dir" || arg == "--temp") && i + 1 < argc) {
                 temp_dir = argv[++i];
+            } else if (arg == "--no-preprocess") {
+                enable_preprocessing = false;
             } else if (arg == "--preprocess") {
-                enable_preprocessing = true;
+                enable_preprocessing = true;  // Deprecated, preprocessing is the default
             } else if (arg == "--no-remove-duplicates") {
                 preprocess_remove_duplicates = false;
             } else if (arg == "--no-remove-non-manifold") {
@@ -226,8 +153,8 @@ cli_main(int argc, char** argv)
     // Parse command-line arguments
     CommandLineArgs args;
     if (!args.parse(argc, argv)) {
-        print_usage(argv[0]);
-        return (argc < 3) ? 1 : 0;  // Return 0 for --help, 1 for parse error
+        print_help(argv[0]);
+        return 1;
     }
 
     if (!args.temp_dir.empty()) {

@@ -4,6 +4,7 @@
 #include "include/debug_path.h"
 #include "engine/command_handler.h"
 #include "engine/socket_stream.h"
+#include "include/help_printer.h"
 #include <iostream>
 #include <cstring>
 #include <memory>
@@ -15,53 +16,6 @@
 
 using namespace MeshRepair;
 using namespace MeshRepair::Engine;
-
-void
-print_engine_help()
-{
-    std::cerr << "MeshRepair Engine Mode (IPC)\n"
-              << "Version: " << Config::VERSION << "\n"
-              << "Built: " << Config::BUILD_DATE << " " << Config::BUILD_TIME << "\n"
-              << "\n"
-              << "Running as IPC engine for addon integration.\n"
-              << "\n"
-              << "Protocol: Binary-framed JSON messages\n"
-              << "Format: [length:4][type:1][json_payload:N]\n"
-              << "\n"
-              << "Available commands:\n"
-              << "  init           - Initialize engine\n"
-              << "  load_mesh      - Load mesh from file or data\n"
-              << "  preprocess     - Preprocess mesh\n"
-              << "  detect_holes   - Detect holes\n"
-              << "  fill_holes     - Fill holes\n"
-              << "  save_mesh      - Save mesh to file or data\n"
-              << "  get_info       - Get engine state and mesh info\n"
-              << "  shutdown       - Graceful shutdown\n"
-              << "\n"
-              << "Communication Modes:\n"
-              << "  1. Pipe Mode (default):\n"
-              << "     Communication via stdin/stdout\n"
-              << "     Started automatically by addon\n"
-              << "\n"
-              << "  2. Socket Mode:\n"
-              << "     Communication via TCP socket\n"
-              << "     Allows manual engine startup for debugging\n"
-              << "     Usage: meshrepair --socket [PORT]\n"
-              << "     Example: meshrepair --socket 9876\n"
-              << "\n"
-              << "Options:\n"
-              << "  --socket PORT      Listen on TCP socket (port number)\n"
-              << "  -v, --verbose <N>  Verbosity level (default: 1)\n"
-              << "                     0 = quiet\n"
-              << "                     1 = info (timing statistics)\n"
-              << "                     2 = verbose (detailed progress)\n"
-              << "                     3 = debug (verbose + debug logging)\n"
-              << "                     4 = trace (debug + PLY file dumps)\n"
-              << "  --temp-dir PATH   Directory for debug PLY outputs (trace mode)\n"
-              << "  --help, -h         Show this help message\n"
-              << "\n"
-              << "Use Ctrl+C or send 'shutdown' command to exit.\n";
-}
 
 int
 engine_main(int argc, char** argv)
@@ -86,7 +40,7 @@ engine_main(int argc, char** argv)
                 verbosity = 2;  // Default to verbose if no level specified
             }
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-            print_engine_help();
+            MeshRepair::print_help(argv[0]);
             return 0;
         } else if (std::strcmp(argv[i], "--socket") == 0) {
             // Next argument should be port number

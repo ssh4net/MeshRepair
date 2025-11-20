@@ -4,6 +4,8 @@
 #include <iostream>
 #include <cstring>
 
+#include "include/help_printer.h"
+
 // Forward declarations
 int
 cli_main(int argc, char** argv);
@@ -15,11 +17,19 @@ main(int argc, char** argv)
 {
     // Check for --engine flag (can be anywhere in args)
     bool engine_mode = false;
+    bool help_requested = (argc <= 1);
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--engine") == 0) {
             engine_mode = true;
-            break;
         }
+        if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            help_requested = true;
+        }
+    }
+
+    if (help_requested) {
+        MeshRepair::print_help(argv[0]);
+        return 0;
     }
 
     try {

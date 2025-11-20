@@ -217,6 +217,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/main.cpp
     meshrepair/cli_main.cpp
     meshrepair/engine_main.cpp
+    meshrepair/help_printer.cpp
     meshrepair/debug_path.cpp
     meshrepair/engine/protocol.cpp
     meshrepair/engine/engine_wrapper.cpp
@@ -246,6 +247,7 @@ set(MESHREPAIR_HEADERS
     meshrepair/engine/socket_stream.h
     meshrepair/include/types.h
     meshrepair/include/config.h
+    meshrepair/include/help_printer.h
     meshrepair/include/mesh_loader.h
     meshrepair/include/hole_detector.h
     meshrepair/include/hole_filler.h
