@@ -1,8 +1,8 @@
 # MeshRepair CLI - User Guide
 
-> **Professional mesh repair for 3D artists, game developers, and 3D scanning professionals**
+> Command-line tool for automatic mesh hole detection and filling
 
-MeshRepair is a powerful command-line tool for automatically detecting and filling holes in 3D meshes. Whether you're cleaning up 3D scans, preparing models for 3D printing, or fixing damaged game assets, MeshRepair provides fast, high-quality results.
+MeshRepair CLI provides batch processing capabilities for detecting and filling holes in triangulated 3D meshes. This guide covers installation, usage, and configuration options.
 
 ![MeshRepair CLI Banner](images/cli-banner-placeholder.png)
 *<!-- PLACEHOLDER: Hero image showing before/after of a repaired 3D scan -->*
@@ -12,14 +12,14 @@ MeshRepair is a powerful command-line tool for automatically detecting and filli
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-- [Understanding Mesh Holes](#understanding-mesh-holes)
-- [The Repair Process](#the-repair-process)
+- [Mesh Hole Concepts](#mesh-hole-concepts)
+- [Processing Pipeline](#processing-pipeline)
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
-- [Quality Presets](#quality-presets)
-- [Advanced Options](#advanced-options)
-- [Working with 3D Scans](#working-with-3d-scans)
-- [Supported File Formats](#supported-file-formats)
+- [Continuity Modes](#continuity-modes)
+- [Configuration Options](#configuration-options)
+- [3D Scan Processing](#3d-scan-processing)
+- [File Format Support](#file-format-support)
 - [Troubleshooting](#troubleshooting)
 - [Command Reference](#command-reference)
 
@@ -27,103 +27,100 @@ MeshRepair is a powerful command-line tool for automatically detecting and filli
 
 ## Quick Start
 
-Repair a mesh with default settings (recommended for most cases):
+Basic mesh repair with default settings:
 
 ```bash
 meshrepair input.obj output.obj
 ```
 
-That's it! MeshRepair will automatically:
-1. Clean up mesh topology issues
-2. Detect all holes
-3. Fill holes with smooth, natural-looking patches
-4. Save the repaired mesh
+This command will:
+1. Load the input mesh
+2. Preprocess to fix topology issues
+3. Detect all holes
+4. Fill holes with C¹ continuity
+5. Save the result
 
 ![Quick Start Example](images/quickstart-example-placeholder.png)
 *<!-- PLACEHOLDER: Terminal screenshot showing basic command and output -->*
 
 ---
 
-## Understanding Mesh Holes
+## Mesh Hole Concepts
 
-### What are Mesh Holes?
+### Definition
 
-A "hole" in a 3D mesh is a gap or opening where the surface is not continuous. Think of it like a hole in a piece of fabric - the edges around it form a boundary, but there's no surface filling the middle.
+A mesh hole is a boundary loop where the surface is discontinuous. Holes are defined by a sequence of border edges that form a closed loop without adjacent faces on one side.
 
 ![Mesh Hole Diagram](images/hole-anatomy-placeholder.png)
 *<!-- PLACEHOLDER: Diagram showing a mesh hole with labeled boundary edges and missing surface -->*
 
-### Common Causes of Holes
+### Common Sources
 
-| Source | Typical Hole Pattern | Example |
-|--------|---------------------|---------|
-| **3D Scanning** | Irregular gaps from occlusion | Scanner couldn't see behind ears on a head scan |
-| **Boolean Operations** | Clean-cut openings | Subtraction that didn't fully close |
-| **Incomplete Modeling** | Missing faces | Bottom of a vase left open |
-| **File Conversion** | Random small holes | Format translation errors |
-| **Corrupted Files** | Scattered missing triangles | Damaged mesh data |
+| Source | Characteristics |
+|--------|-----------------|
+| **3D Scanning** | Irregular boundaries from occlusion or limited scanner coverage |
+| **Boolean Operations** | Clean geometric openings from CSG operations |
+| **Incomplete Modeling** | Intentionally or accidentally omitted faces |
+| **File Conversion** | Data loss during format translation |
+| **Data Corruption** | Random missing faces from file damage |
 
 ![Hole Sources Examples](images/hole-sources-placeholder.png)
 *<!-- PLACEHOLDER: Grid of 5 images showing each hole type -->*
 
-### Why Repair Holes?
+### Applications Requiring Watertight Meshes
 
-- **3D Printing**: Slicers require "watertight" meshes
-- **Game Engines**: Holes cause rendering artifacts and physics issues
-- **Simulation**: CFD and FEA need closed surfaces
-- **Visualization**: Professional renders require clean geometry
+- **Additive Manufacturing**: Slicing software requires closed surfaces
+- **Game Engines**: Physics and rendering systems expect manifold geometry
+- **Simulation**: CFD and FEA solvers need closed boundary conditions
+- **Rendering**: Ray tracing and global illumination require consistent normals
 
 ---
 
-## The Repair Process
+## Processing Pipeline
 
-MeshRepair uses a sophisticated multi-stage algorithm to repair your meshes:
+MeshRepair processes meshes through four sequential stages:
 
-### Stage 1: Preprocessing (Cleanup)
+### Stage 1: Preprocessing
 
-Before filling holes, MeshRepair cleans up common mesh problems:
+Topology cleanup operations:
 
 ![Preprocessing Stage](images/preprocessing-stage-placeholder.png)
 *<!-- PLACEHOLDER: Diagram showing mesh before/after preprocessing -->*
 
-| Problem | Fix Applied |
-|---------|-------------|
-| **Duplicate Vertices** | Merged to single vertex |
-| **Non-Manifold Geometry** | Problematic vertices/edges removed |
-| **3-Face Fans** | Collapsed to cleaner topology |
-| **Isolated Vertices** | Floating points removed |
-| **Small Fragments** | Tiny disconnected pieces removed |
+| Operation | Description |
+|-----------|-------------|
+| **Duplicate Merging** | Combines vertices at identical positions |
+| **Non-Manifold Removal** | Removes edges with >2 adjacent faces and vertices with non-disk neighborhoods |
+| **3-Face Fan Collapse** | Simplifies degenerate vertex configurations |
+| **Isolated Vertex Removal** | Deletes vertices with no face connections |
+| **Small Component Removal** | Removes disconnected mesh fragments below threshold |
 
 ### Stage 2: Hole Detection
 
-MeshRepair analyzes the mesh to find all boundary loops (holes):
+Identifies all boundary loops by traversing border halfedges:
 
 ![Hole Detection](images/hole-detection-placeholder.png)
 *<!-- PLACEHOLDER: Mesh with detected holes highlighted in different colors -->*
 
-For each hole, the tool calculates:
-- **Boundary size**: Number of vertices around the hole
-- **Diameter**: Approximate size of the opening
-- **Shape complexity**: How irregular the boundary is
+For each detected hole:
+- **Boundary vertex count**: Number of vertices forming the hole perimeter
+- **Estimated diameter**: Bounding box diagonal of boundary vertices
+- **Boundary halfedge**: Entry point for filling algorithm
 
 ### Stage 3: Hole Filling
 
-Each hole is filled using the **Liepa Algorithm** with **Laplacian Fairing**:
+Each hole is triangulated using the Liepa algorithm:
 
 ![Hole Filling Process](images/filling-process-placeholder.png)
 *<!-- PLACEHOLDER: 4-step diagram showing: 1) Hole boundary 2) Initial triangulation 3) Refinement 4) Fairing/smoothing -->*
 
-1. **Triangulation**: Creates an initial patch using Constrained Delaunay Triangulation
-2. **Refinement**: Adds vertices to match surrounding mesh density
-3. **Fairing**: Smooths the patch to blend naturally with surrounding geometry
+1. **Triangulation**: Constrained Delaunay triangulation (2D projection or 3D)
+2. **Refinement**: Optional vertex insertion to match local mesh density
+3. **Fairing**: Laplacian smoothing for surface continuity (C⁰/C¹/C²)
 
 ### Stage 4: Output
 
-The repaired mesh is saved with:
-- All holes filled
-- Clean topology
-- Preserved original detail
-- Optimized file size
+The repaired mesh is written to the specified output file.
 
 ---
 
@@ -132,8 +129,8 @@ The repaired mesh is saved with:
 ### Windows
 
 1. Download `meshrepair-windows.zip` from the [Releases page](https://github.com/your-repo/meshrepair/releases)
-2. Extract to a folder (e.g., `C:\Tools\MeshRepair\`)
-3. Add to PATH (optional but recommended):
+2. Extract to desired location (e.g., `C:\Tools\MeshRepair\`)
+3. Optionally add to system PATH:
    ```cmd
    setx PATH "%PATH%;C:\Tools\MeshRepair"
    ```
@@ -141,7 +138,6 @@ The repaired mesh is saved with:
 ### Linux
 
 ```bash
-# Download and extract
 wget https://github.com/your-repo/meshrepair/releases/latest/meshrepair-linux.tar.gz
 tar -xzf meshrepair-linux.tar.gz
 sudo mv meshrepair /usr/local/bin/
@@ -150,16 +146,12 @@ sudo mv meshrepair /usr/local/bin/
 ### macOS
 
 ```bash
-# Using Homebrew (recommended)
-brew install meshrepair
-
-# Or manual installation
 wget https://github.com/your-repo/meshrepair/releases/latest/meshrepair-macos.tar.gz
 tar -xzf meshrepair-macos.tar.gz
 sudo mv meshrepair /usr/local/bin/
 ```
 
-### Verify Installation
+### Verification
 
 ```bash
 meshrepair --help
@@ -172,19 +164,19 @@ meshrepair --help
 
 ## Basic Usage
 
-### Simple Repair
+### Standard Repair
 
 ```bash
 meshrepair model.obj repaired.obj
 ```
 
-### With Progress Information
+### Verbose Output
 
 ```bash
 meshrepair model.obj repaired.obj -v 2
 ```
 
-Output example:
+Example output:
 ```
 [INFO] Loading mesh: model.obj
 [INFO] Vertices: 45,230  Faces: 89,456
@@ -194,102 +186,90 @@ Output example:
 [INFO] Detecting holes...
   - Found 4 holes
 [INFO] Filling holes...
-  - Hole 1/4: 23 boundary vertices... filled (45 faces added)
-  - Hole 2/4: 156 boundary vertices... filled (312 faces added)
-  - Hole 3/4: 8 boundary vertices... filled (12 faces added)
-  - Hole 4/4: 67 boundary vertices... filled (134 faces added)
+  - Hole 1/4: 23 boundary vertices - filled (45 faces added)
+  - Hole 2/4: 156 boundary vertices - filled (312 faces added)
+  - Hole 3/4: 8 boundary vertices - filled (12 faces added)
+  - Hole 4/4: 67 boundary vertices - filled (134 faces added)
 [INFO] Saving: repaired.obj
-[INFO] Complete! Time: 2.34s
+[INFO] Complete. Time: 2.34s
 ```
 
-### Converting Formats
+### Format Conversion
 
 ```bash
-# OBJ to PLY
+# OBJ to PLY (binary)
 meshrepair model.obj model.ply
 
 # PLY to OBJ
 meshrepair scan.ply scan.obj
+
+# PLY binary to ASCII
+meshrepair model.ply output.ply --ascii-ply
 ```
 
 ---
 
-## Quality Presets
+## Continuity Modes
 
-Choose a preset based on your needs:
+The `--continuity` parameter controls surface smoothness at filled regions:
 
-### Fast Mode (Speed Priority)
+### C⁰ Continuity (Positional)
 
 ```bash
-meshrepair model.obj fixed.obj --continuity 0 --no-refine --skip-cubic
+meshrepair model.obj fixed.obj --continuity 0
 ```
 
-| Setting | Value |
-|---------|-------|
-| Continuity | C⁰ (positional) |
-| Refinement | Disabled |
-| Quality | Basic |
-| Speed | Fastest |
+- Filled surface meets boundary positions only
+- Visible seam at patch boundary
+- Fastest computation
 
-**Best for**: Quick previews, large meshes, non-critical repairs
+![C⁰ Mode Result](images/fast-mode-placeholder.png)
+*<!-- PLACEHOLDER: Before/after showing C⁰ repair -->*
 
-![Fast Mode Result](images/fast-mode-placeholder.png)
-*<!-- PLACEHOLDER: Before/after showing fast mode repair -->*
-
-### Quality Mode (Recommended)
+### C¹ Continuity (Tangent) - Default
 
 ```bash
 meshrepair model.obj fixed.obj --continuity 1
 ```
 
-| Setting | Value |
-|---------|-------|
-| Continuity | C¹ (smooth tangents) |
-| Refinement | Enabled |
-| Quality | High |
-| Speed | Balanced |
+- Filled surface matches boundary tangent directions
+- Smooth visual transition
+- Balanced computation time
 
-**Best for**: Most use cases, game assets, general 3D work
+![C¹ Mode Result](images/quality-mode-placeholder.png)
+*<!-- PLACEHOLDER: Before/after showing C¹ repair -->*
 
-![Quality Mode Result](images/quality-mode-placeholder.png)
-*<!-- PLACEHOLDER: Before/after showing quality mode repair -->*
-
-### High Quality Mode (Maximum Quality)
+### C² Continuity (Curvature)
 
 ```bash
 meshrepair model.obj fixed.obj --continuity 2
 ```
 
-| Setting | Value |
-|---------|-------|
-| Continuity | C² (smooth curvature) |
-| Refinement | Enabled |
-| Quality | Maximum |
-| Speed | Slower |
+- Filled surface matches boundary curvature
+- Minimal visible seam
+- Highest computation cost
 
-**Best for**: Hero assets, 3D printing, medical/scientific visualization
+![C² Mode Result](images/highquality-mode-placeholder.png)
+*<!-- PLACEHOLDER: Before/after showing C² repair -->*
 
-![High Quality Mode Result](images/highquality-mode-placeholder.png)
-*<!-- PLACEHOLDER: Before/after showing high quality mode repair with smooth curvature -->*
+### Comparison
 
-### Visual Comparison
-
-![Quality Comparison](images/quality-comparison-placeholder.png)
+![Continuity Comparison](images/quality-comparison-placeholder.png)
 *<!-- PLACEHOLDER: Side-by-side comparison of C⁰, C¹, C² on same hole -->*
 
 ---
 
-## Advanced Options
+## Configuration Options
 
 ### Hole Size Limits
 
-Control which holes get filled based on size:
+Control which holes are processed based on size:
 
 ```bash
-# Only fill holes with up to 500 boundary vertices
+# Maximum boundary vertices (skip larger holes)
 meshrepair model.obj fixed.obj --max-boundary 500
 
-# Only fill holes smaller than 5% of mesh size
+# Maximum diameter as ratio of mesh bounding box
 meshrepair model.obj fixed.obj --max-diameter 0.05
 ```
 
@@ -298,23 +278,34 @@ meshrepair model.obj fixed.obj --max-diameter 0.05
 
 ### Preprocessing Control
 
-Fine-tune the cleanup process:
-
 ```bash
-# Skip all preprocessing (mesh is already clean)
+# Skip all preprocessing
 meshrepair model.obj fixed.obj --no-preprocess
 
-# Only remove duplicates
-meshrepair model.obj fixed.obj --no-remove-non-manifold --no-remove-3facefan --no-remove-isolated
+# Selective preprocessing
+meshrepair model.obj fixed.obj --no-remove-non-manifold --no-remove-3facefan
 ```
 
-### Threading Performance
+### Algorithm Selection
 
 ```bash
-# Use 4 threads
+# Disable 2D triangulation (use 3D only)
+meshrepair model.obj fixed.obj --no-2d-cdt
+
+# Disable mesh refinement
+meshrepair model.obj fixed.obj --no-refine
+
+# Skip cubic search algorithm (faster, may reduce quality)
+meshrepair model.obj fixed.obj --skip-cubic
+```
+
+### Threading
+
+```bash
+# Specify thread count
 meshrepair large_model.obj fixed.obj --threads 4
 
-# Auto-detect optimal thread count (default)
+# Auto-detect (default)
 meshrepair large_model.obj fixed.obj --threads 0
 ```
 
@@ -323,61 +314,59 @@ meshrepair large_model.obj fixed.obj --threads 0
 
 ### Debug Output
 
-Generate intermediate files for troubleshooting:
-
 ```bash
 meshrepair problem.obj fixed.obj --temp-dir ./debug -v 4
 ```
 
-This creates:
-- `debug_00_original_loaded.ply` - Mesh after loading
+Generated files:
+- `debug_00_original_loaded.ply` - Input mesh after loading
 - `debug_06_partition_*.ply` - Partitioned submeshes
-- `debug_07_partition_*_filled.ply` - After hole filling
-- `debug_08_final_merged.ply` - Final result
+- `debug_07_partition_*_filled.ply` - Submeshes after filling
+- `debug_08_final_merged.ply` - Final merged result
 
 ---
 
-## Working with 3D Scans
+## 3D Scan Processing
 
-3D scans often have unique challenges. Here's how to handle them:
+3D scans present specific challenges for hole filling.
 
-### Typical Scan Issues
+### Common Issues
 
 ![3D Scan Issues](images/scan-issues-placeholder.png)
 *<!-- PLACEHOLDER: Annotated 3D scan showing common problem areas -->*
 
-1. **Occlusion holes**: Areas the scanner couldn't see
-2. **Edge artifacts**: Rough boundaries where scan ended
-3. **Noise clusters**: Small disconnected fragments
-4. **Thin features**: Hair, fingers, fine details with gaps
+1. **Occlusion gaps**: Areas not visible to scanner
+2. **Edge artifacts**: Incomplete boundaries at scan limits
+3. **Noise fragments**: Small disconnected components
+4. **Missing fine detail**: Gaps in hair, fingers, thin features
 
-### Recommended Workflow for Scans
+### Recommended Settings
 
 ```bash
-# Step 1: Heavy cleanup to remove scan artifacts
-meshrepair raw_scan.ply cleaned.ply --preprocess-only
+# Heavy preprocessing for scan artifacts
+meshrepair raw_scan.ply cleaned.ply -v 2
 
-# Step 2: High-quality hole filling
-meshrepair cleaned.ply final.ply --continuity 2 --max-boundary 2000
+# High-quality filling with larger size limits
+meshrepair cleaned.ply final.ply --continuity 2 --max-boundary 2000 --max-diameter 0.2
 ```
 
 ### Large Scan Files
 
-For scans with millions of triangles:
+For multi-million polygon scans:
 
 ```bash
-# Use binary PLY for faster I/O
-meshrepair scan.ply repaired.ply --threads 0
+# Use all available threads
+meshrepair large_scan.ply repaired.ply --threads 0
 
-# If memory is limited, process in sections
-# (use external decimation first, then repair, then subdivide)
+# Binary PLY for faster I/O
+meshrepair large_scan.ply repaired.ply
 ```
 
-### Preserving Scan Detail
+### Preserving Detail
 
 ```bash
-# Maximum quality settings for important scans
-meshrepair heritage_artifact.ply restored.ply \
+# Maximum quality settings
+meshrepair artifact.ply restored.ply \
     --continuity 2 \
     --max-diameter 0.15 \
     -v 2
@@ -388,18 +377,18 @@ meshrepair heritage_artifact.ply restored.ply \
 
 ---
 
-## Supported File Formats
+## File Format Support
 
 | Format | Extension | Read | Write | Notes |
 |--------|-----------|------|-------|-------|
-| **Wavefront OBJ** | `.obj` | Yes | Yes | Most compatible, ASCII text |
+| **Wavefront OBJ** | `.obj` | Yes | Yes | ASCII format, wide compatibility |
 | **Stanford PLY** | `.ply` | Yes | Yes | Binary (default) or ASCII |
 | **Object File Format** | `.off` | Yes | Yes | CGAL native format |
 
-### Format Tips
+### Format Selection
 
-- **OBJ**: Best for compatibility with other software
-- **PLY Binary**: Fastest for large files (default)
+- **OBJ**: Maximum compatibility with other software
+- **PLY Binary**: Fastest I/O for large files (default for PLY output)
 - **PLY ASCII**: Human-readable, use `--ascii-ply` flag
 
 ```bash
@@ -411,12 +400,13 @@ meshrepair model.obj output.ply --ascii-ply
 
 ## Troubleshooting
 
-### Common Issues
+### No Holes Detected
 
-#### "No holes detected"
+Possible causes:
+- Mesh is already watertight
+- All holes exceed size limits
 
-Your mesh might already be watertight, or holes are too large:
-
+Solutions:
 ```bash
 # Check with verbose output
 meshrepair model.obj fixed.obj -v 2
@@ -425,44 +415,39 @@ meshrepair model.obj fixed.obj -v 2
 meshrepair model.obj fixed.obj --max-boundary 5000 --max-diameter 0.5
 ```
 
-#### "Hole filling failed"
+### Hole Filling Failures
 
-Some holes have degenerate geometry:
+Possible causes:
+- Degenerate geometry (zero-area triangles)
+- Self-intersecting boundaries
+- Complex non-planar hole shapes
 
+Solutions:
 ```bash
-# Try different triangulation methods
+# Try different triangulation
 meshrepair model.obj fixed.obj --no-2d-cdt
 
-# Or skip problematic holes
-meshrepair model.obj fixed.obj --max-boundary 100
+# Enable all preprocessing
+meshrepair model.obj fixed.obj -v 2
 ```
 
-#### Slow Performance
+### Performance Issues
 
+Solutions:
 ```bash
-# Reduce quality for speed
+# Reduce quality for faster processing
 meshrepair large.obj fixed.obj --continuity 0 --skip-cubic --no-refine
 
-# Check thread usage
+# Verify thread utilization
 meshrepair large.obj fixed.obj -v 2 --threads 0
 ```
 
-#### Memory Issues
+### Memory Constraints
 
-For very large meshes (10M+ triangles):
-- Use binary PLY format
+For meshes exceeding available RAM:
+- Use binary PLY format for I/O
 - Process in sections if possible
-- Ensure adequate system RAM (aim for 4x mesh file size)
-
-### Getting Help
-
-```bash
-# Full option reference
-meshrepair --help
-
-# Version information
-meshrepair --version
-```
+- Allocate approximately 4× mesh file size in RAM
 
 ---
 
@@ -479,22 +464,22 @@ meshrepair --engine [engine-options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-h, --help` | - | Show help message |
-| `-v, --verbose <0-4>` | 1 | Verbosity: 0=quiet, 1=info, 2=verbose, 3=debug, 4=trace |
-| `--validate` | off | Validate mesh before/after processing |
-| `--temp-dir <path>` | - | Directory for debug output files |
+| `-h, --help` | - | Display help message |
+| `-v, --verbose <0-4>` | 1 | Verbosity level |
+| `--validate` | off | Validate mesh topology |
+| `--temp-dir <path>` | - | Debug output directory |
 
 ### Hole Filling Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--continuity <0\|1\|2>` | 1 | Surface continuity (C⁰/C¹/C²) |
-| `--max-boundary <n>` | 1000 | Max hole boundary vertices |
-| `--max-diameter <r>` | 0.1 | Max hole size (ratio of mesh bbox) |
+| `--continuity <0\|1\|2>` | 1 | Surface continuity level |
+| `--max-boundary <n>` | 1000 | Maximum hole boundary vertices |
+| `--max-diameter <r>` | 0.1 | Maximum hole diameter ratio |
 | `--no-refine` | off | Disable patch refinement |
 | `--no-2d-cdt` | off | Disable 2D triangulation |
-| `--no-3d-delaunay` | off | Disable 3D fallback |
-| `--skip-cubic` | off | Skip cubic search (faster) |
+| `--no-3d-delaunay` | off | Disable 3D triangulation fallback |
+| `--skip-cubic` | off | Skip cubic search algorithm |
 
 ### Preprocessing Options
 
@@ -503,7 +488,7 @@ meshrepair --engine [engine-options]
 | `--no-preprocess` | off | Skip all preprocessing |
 | `--no-remove-duplicates` | off | Keep duplicate vertices |
 | `--no-remove-non-manifold` | off | Keep non-manifold geometry |
-| `--no-remove-3facefan` | off | Keep 3-face fans |
+| `--no-remove-3facefan` | off | Keep 3-face fan configurations |
 | `--no-remove-isolated` | off | Keep isolated vertices |
 | `--no-remove-small` | off | Keep small components |
 
@@ -511,21 +496,21 @@ meshrepair --engine [engine-options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--threads <n>` | 0 (auto) | Number of worker threads |
-| `--no-partition` | off | Use legacy pipeline |
+| `--threads <n>` | 0 (auto) | Worker thread count |
+| `--no-partition` | off | Disable partitioned processing |
 | `--cgal-loader` | off | Force CGAL OBJ loader |
 
 ### Output Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--ascii-ply` | off | Save PLY as ASCII (not binary) |
+| `--ascii-ply` | off | Write PLY in ASCII format |
 
 ---
 
-## Examples Gallery
+## Examples
 
-### Example 1: Simple Object Repair
+### Basic Repair
 
 ![Example 1](images/example-simple-placeholder.png)
 *<!-- PLACEHOLDER: Before/after of a simple object with small holes -->*
@@ -534,7 +519,7 @@ meshrepair --engine [engine-options]
 meshrepair vase.obj vase_fixed.obj
 ```
 
-### Example 2: 3D Scan Restoration
+### 3D Scan Restoration
 
 ![Example 2](images/example-scan-placeholder.png)
 *<!-- PLACEHOLDER: Before/after of a human bust scan -->*
@@ -543,7 +528,7 @@ meshrepair vase.obj vase_fixed.obj
 meshrepair bust_scan.ply bust_restored.ply --continuity 2 -v 2
 ```
 
-### Example 3: Game Asset Cleanup
+### Game Asset Preparation
 
 ![Example 3](images/example-game-placeholder.png)
 *<!-- PLACEHOLDER: Before/after of a game character model -->*
@@ -552,7 +537,7 @@ meshrepair bust_scan.ply bust_restored.ply --continuity 2 -v 2
 meshrepair character.obj character_clean.obj --max-diameter 0.05
 ```
 
-### Example 4: 3D Print Preparation
+### Additive Manufacturing Preparation
 
 ![Example 4](images/example-print-placeholder.png)
 *<!-- PLACEHOLDER: Before/after showing watertight mesh for printing -->*
@@ -563,12 +548,17 @@ meshrepair figurine.obj figurine_printready.obj --continuity 2 --validate
 
 ---
 
-## Need More Help?
+## Related Documentation
 
-- **Blender Users**: Check out the [MeshRepair Blender Addon](blender-addon-guide.md) for an integrated experience
-- **Developers**: See the [API Documentation](api-reference.md) for programmatic access
-- **Issues**: Report bugs on [GitHub Issues](https://github.com/your-repo/meshrepair/issues)
+- [Blender Addon Guide](blender-addon-guide.md) - Interactive repair within Blender
+- [Index](index.md) - Project overview
 
 ---
 
-*MeshRepair uses the CGAL library for computational geometry. Hole filling algorithm based on Liepa 2003 "Filling Holes in Meshes".*
+## References
+
+Hole filling algorithm:
+> Peter Liepa. "Filling Holes in Meshes." *Eurographics Symposium on Geometry Processing*, 2003.
+
+Fairing algorithm:
+> Mario Botsch et al. "On Linear Variational Surface Deformation Methods." *IEEE Transactions on Visualization and Computer Graphics*, 2008.

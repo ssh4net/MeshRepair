@@ -1,110 +1,108 @@
 # MeshRepair Documentation
 
-> **Professional mesh hole filling for 3D artists, game developers, and scanning professionals**
+> Automatic mesh hole detection and filling for 3D scanning, game development, and additive manufacturing workflows
 
 ![MeshRepair Hero](images/hero-placeholder.png)
 *<!-- PLACEHOLDER: Hero banner showing before/after mesh repair -->*
 
 ---
 
-## What is MeshRepair?
+## Overview
 
-MeshRepair is a powerful, open-source tool for automatically detecting and filling holes in 3D meshes. Whether you're working with 3D scans, game assets, or models for 3D printing, MeshRepair helps you create clean, watertight meshes quickly and reliably.
+MeshRepair is an open-source tool for detecting and filling holes in triangulated 3D meshes. It provides both a command-line interface for batch processing and a Blender addon for interactive use.
 
 ---
 
-## Why This Tool Was Created
+## Project Background
 
 ![RealityScan Workflow Problem](images/realityscan-problem-placeholder.png)
 *<!-- PLACEHOLDER: Diagram showing RealityScan mesh with huge boundary polygons, then after removal showing holes -->*
 
-MeshRepair was born from a real-world photogrammetry workflow challenge:
+This tool was developed to address a common issue in photogrammetry workflows:
 
-### The Problem with Photogrammetry Meshes
+### The Problem with Photogrammetry Output
 
-Tools like **Epic's RealityScan** (formerly RealityCapture) and similar photogrammetry software generate "watertight" meshes—but with a catch. To close the mesh, these tools create **enormous polygons** in problematic areas:
+Software such as **Epic's RealityScan** (formerly RealityCapture) and similar photogrammetry applications generate watertight meshes by creating large polygons to close open boundaries. These oversized polygons typically appear in:
 
-| Problem Area | What Happens |
-|--------------|--------------|
-| **Mesh boundaries** | Giant triangles spanning the entire edge |
-| **Low overlap regions** | Huge faces covering areas with few photos |
-| **Weak depth areas** | Oversized polygons hiding poor reconstruction |
+| Area | Cause |
+|------|-------|
+| **Mesh boundaries** | Large triangles spanning the capture edge |
+| **Low overlap regions** | Oversized faces where few source images overlap |
+| **Weak depth reconstruction** | Large polygons masking areas with poor 3D data |
 
 ![Problematic Polygons Example](images/huge-polygons-placeholder.png)
 *<!-- PLACEHOLDER: Close-up of a RealityScan mesh showing giant boundary triangles -->*
 
-### Why Remove Them?
+### Impact on Downstream Processing
 
-These giant polygons cause problems for downstream work:
+These oversized polygons create problems for subsequent operations:
 
-- **Sculpting**: Uneven topology makes brushes behave unpredictably
-- **Retopology/Wrapping**: Automatic tools struggle with extreme polygon sizes
-- **Texturing**: UV unwrapping produces distorted results
-- **Subdivision**: Creates wildly uneven mesh density
+- **Sculpting**: Inconsistent polygon sizes cause uneven brush behavior
+- **Retopology/Wrapping**: Automatic retopology tools produce poor results on mixed-density meshes
+- **UV Mapping**: Extreme size differences lead to texture distortion
+- **Subdivision**: Non-uniform polygon sizes create uneven mesh density
 
-### The Solution
+### Intended Workflow
 
-**Remove the problematic polygons** → This creates holes → **Fill them properly with MeshRepair**
-
-Unlike the original giant polygons, MeshRepair creates:
-- **Evenly-sized triangles** matching surrounding mesh density
-- **Smooth surfaces** that blend naturally with existing geometry
-- **Clean topology** ready for sculpting and retopology
+The recommended approach is to remove problematic oversized polygons (creating holes) and then fill those holes with properly-sized geometry:
 
 ![Workflow Comparison](images/workflow-comparison-placeholder.png)
 *<!-- PLACEHOLDER: 3-step comparison: 1) Original with huge polys 2) After removal (holes) 3) After MeshRepair (clean) -->*
 
-### Built for High-Poly Meshes
+MeshRepair generates fill geometry with:
+- Triangle sizes matching the surrounding mesh density
+- Smooth surface continuity with existing geometry
+- Clean topology suitable for further processing
 
-Photogrammetry outputs are often **millions of polygons**. MeshRepair was designed from the ground up to handle these demanding meshes:
+### High-Polygon Mesh Support
 
-- **Multi-threaded processing** for fast repair of high-poly meshes
-- **Partitioned parallel filling** for efficient memory usage
-- **Optimized file I/O** with fast OBJ/PLY loaders
-- **Edit Mode support** in Blender for working on sections of huge meshes
+Photogrammetry outputs frequently contain millions of polygons. MeshRepair is designed to handle large meshes efficiently:
+
+- Multi-threaded hole filling with automatic workload distribution
+- Memory-efficient partitioned processing
+- Optimized OBJ/PLY file loading
+- Blender Edit Mode support for processing mesh sections
 
 | Mesh Size | Typical Processing Time |
 |-----------|------------------------|
 | 100K triangles | < 1 second |
 | 1M triangles | 2-5 seconds |
 | 10M triangles | 15-30 seconds |
-| 50M+ triangles | Minutes (use Edit Mode for sections) |
+| 50M+ triangles | Minutes (section-based processing recommended) |
 
-### Ideal Workflow
+### Recommended Workflow
 
 ```
-RealityScan/RealityCapture Export
+Photogrammetry Export (RealityScan, Metashape, etc.)
         ↓
-Remove huge boundary polygons (in Blender/ZBrush/etc.)
+Remove oversized boundary polygons (Blender, ZBrush, etc.)
         ↓
-MeshRepair (fill holes with quality geometry)
+MeshRepair (fill holes with uniform geometry)
         ↓
-Sculpt, Retopologize, or Wrap with clean base mesh
+Continue with sculpting, retopology, or mesh wrapping
 ```
-
-This workflow gives you the **best of both worlds**: the detail from photogrammetry with clean, workable topology for artist refinement.
-
-### Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Automatic Hole Detection** | Finds all gaps and openings in your mesh |
-| **Smart Hole Filling** | Creates smooth, natural-looking patches |
-| **Mesh Cleanup** | Fixes topology issues before repair |
-| **Multiple Quality Levels** | From fast previews to production quality |
-| **Blender Integration** | Native addon for seamless workflow |
-| **Command Line Tool** | Batch processing and automation |
-| **Multi-threaded** | Fast processing on multi-core systems |
 
 ---
 
-## Choose Your Tool
+## Features
 
-<div class="tool-cards">
+| Feature | Description |
+|---------|-------------|
+| **Hole Detection** | Identifies all boundary loops in the mesh |
+| **Hole Filling** | Triangulates holes using constrained Delaunay methods |
+| **Mesh Preprocessing** | Removes duplicate vertices, non-manifold geometry, and isolated components |
+| **Surface Continuity** | Supports C⁰, C¹, and C² continuity for filled regions |
+| **Blender Integration** | Native addon with Edit Mode selection support |
+| **Command Line Interface** | Batch processing and scripting support |
+| **Multi-threaded Processing** | Parallel hole filling for large meshes |
+
+---
+
+## Tools
 
 ### Command Line Interface
 
-For power users, batch processing, and automation.
+For batch processing, automation, and integration with other tools.
 
 ![CLI Preview](images/cli-preview-placeholder.png)
 *<!-- PLACEHOLDER: Terminal screenshot -->*
@@ -113,106 +111,85 @@ For power users, batch processing, and automation.
 meshrepair input.obj output.obj
 ```
 
-**[Read the CLI Guide →](cli-guide.md)**
+**[CLI Documentation →](cli-guide.md)**
 
 ---
 
 ### Blender Addon
 
-For 3D artists who want seamless integration.
+For interactive use within Blender's modeling environment.
 
 ![Blender Preview](images/blender-preview-placeholder.png)
 *<!-- PLACEHOLDER: Blender UI screenshot -->*
 
-One-click repair directly in Blender's sidebar.
+Provides direct access to repair operations from Blender's sidebar panel.
 
-**[Read the Blender Guide →](blender-addon-guide.md)**
-
-</div>
+**[Blender Addon Documentation →](blender-addon-guide.md)**
 
 ---
 
-## Quick Start
+## Technical Overview
 
-### 5-Minute Setup
-
-#### For Blender Users
-
-1. **Download** the latest release
-2. **Install** the addon in Blender preferences
-3. **Configure** the engine path
-4. **Select** a mesh and click **Quality Repair**
-
-#### For CLI Users
-
-1. **Download** the executable for your platform
-2. **Run**: `meshrepair model.obj fixed.obj`
-3. Done!
-
----
-
-## How It Works
-
-MeshRepair uses a sophisticated algorithm to repair meshes:
+MeshRepair processes meshes through four stages:
 
 ![Process Diagram](images/process-diagram-placeholder.png)
 *<!-- PLACEHOLDER: Flowchart showing the 4 stages -->*
 
 ### 1. Preprocessing
-Clean up mesh topology: remove duplicates, fix non-manifold geometry, remove debris.
+Cleans mesh topology by removing duplicate vertices, non-manifold elements, isolated vertices, and small disconnected components.
 
 ### 2. Hole Detection
-Find all boundary loops (holes) in the mesh surface.
+Identifies all boundary loops (holes) by traversing border halfedges in the mesh structure.
 
 ### 3. Hole Filling
-Fill each hole using Constrained Delaunay Triangulation with Laplacian fairing.
+Fills each hole using the Liepa algorithm with constrained Delaunay triangulation and optional Laplacian fairing for surface smoothness.
 
 ### 4. Output
-Save the repaired, watertight mesh.
+Exports the repaired mesh in the specified format.
 
 ---
 
-## Use Cases
+## Applications
 
 ### 3D Scanning
 
 ![Scan Use Case](images/usecase-scan-placeholder.png)
 *<!-- PLACEHOLDER: Before/after of 3D scan -->*
 
-Fill gaps from scanner occlusion. Perfect for photogrammetry, structured light, and LiDAR data.
+Fills gaps resulting from scanner occlusion. Applicable to photogrammetry, structured light scanning, and LiDAR data.
 
 ### Game Development
 
 ![Game Use Case](images/usecase-game-placeholder.png)
 *<!-- PLACEHOLDER: Before/after of game asset -->*
 
-Prepare assets for engines that require closed meshes. Fix imported models with topology issues.
+Prepares assets for game engines that require closed mesh geometry. Repairs imported models with topology defects.
 
-### 3D Printing
+### Additive Manufacturing
 
 ![Print Use Case](images/usecase-print-placeholder.png)
 *<!-- PLACEHOLDER: Before/after with slicer preview -->*
 
-Create watertight meshes required by slicers. Ensure successful prints every time.
+Creates watertight meshes required by slicing software for 3D printing.
 
 ### Digital Preservation
 
 ![Heritage Use Case](images/usecase-heritage-placeholder.png)
 *<!-- PLACEHOLDER: Before/after of heritage artifact scan -->*
 
-Restore scanned artifacts and cultural heritage objects with museum-quality repairs.
+Repairs scanned cultural heritage artifacts and archaeological objects.
 
 ---
 
-## Quality Levels
+## Surface Continuity Levels
 
-Choose the right quality for your needs:
+The hole filling algorithm supports three continuity levels:
 
-| Level | Continuity | Speed | Best For |
-|-------|------------|-------|----------|
-| **Fast** | C⁰ | ★★★★★ | Previews, large meshes |
-| **Quality** | C¹ | ★★★☆☆ | Most work, balanced |
-| **High Quality** | C² | ★★☆☆☆ | Production, printing |
+| Level | Description | Computation Cost | Application |
+|-------|-------------|------------------|-------------|
+| **C⁰** | Positional continuity | Low | Fast processing, preview |
+| **C¹** | Tangent continuity | Medium | General use |
+| **C²** | Curvature continuity | High | High-quality output |
 
 ![Quality Comparison](images/quality-levels-placeholder.png)
 *<!-- PLACEHOLDER: Side-by-side comparison of the three quality levels -->*
@@ -232,48 +209,41 @@ Choose the right quality for your needs:
 
 - **RAM**: 16 GB
 - **CPU**: 8+ cores (for multi-threaded processing)
-- **Storage**: SSD for large meshes
+- **Storage**: SSD (for large mesh files)
 
 ---
 
 ## Documentation
 
-| Guide | Description |
-|-------|-------------|
-| **[CLI Guide](cli-guide.md)** | Command line usage and options |
-| **[Blender Addon Guide](blender-addon-guide.md)** | Complete addon documentation |
-| **[FAQ](faq.md)** | Frequently asked questions |
-| **[Troubleshooting](troubleshooting.md)** | Common issues and solutions |
+| Document | Description |
+|----------|-------------|
+| **[CLI Guide](cli-guide.md)** | Command line interface usage |
+| **[Blender Addon Guide](blender-addon-guide.md)** | Blender addon installation and usage |
 
 ---
 
-## Getting Help
+## Support
 
-- **GitHub Issues**: [Report bugs](https://github.com/your-repo/meshrepair/issues)
-- **Discussions**: [Ask questions](https://github.com/your-repo/meshrepair/discussions)
-- **Blender Artists**: [Community thread](https://blenderartists.org/)
+- **Issue Tracker**: [GitHub Issues](https://github.com/your-repo/meshrepair/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-repo/meshrepair/discussions)
 
 ---
 
 ## License
 
-MeshRepair is open-source software licensed under **GPL v2.0**.
+MeshRepair is released under the **GPL v2.0** license.
 
-The project uses:
+Dependencies:
 - **CGAL** - Computational geometry algorithms
 - **nlohmann/json** - JSON parsing
-- **RapidOBJ** - Fast OBJ loading
+- **RapidOBJ** - OBJ file loading
 
 ---
 
-## Acknowledgments
+## References
 
 Hole filling algorithm based on:
 > Peter Liepa. "Filling Holes in Meshes." *Eurographics Symposium on Geometry Processing*, 2003.
 
 Fairing algorithm based on:
-> Mario Botsch et al. "On Linear Variational Surface Deformation Methods." *IEEE TVCG*, 2008.
-
----
-
-*Built with care for the 3D community.*
+> Mario Botsch et al. "On Linear Variational Surface Deformation Methods." *IEEE Transactions on Visualization and Computer Graphics*, 2008.

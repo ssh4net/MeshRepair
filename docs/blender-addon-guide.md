@@ -1,8 +1,8 @@
 # MeshRepair for Blender - User Guide
 
-> **Seamless mesh repair integrated directly into your Blender workflow**
+> Blender addon for mesh hole detection and filling
 
-MeshRepair for Blender brings professional-grade hole filling and mesh cleanup directly into Blender's interface. No need to export, repair externally, and re-import—just select your mesh and click repair.
+MeshRepair for Blender integrates the MeshRepair engine directly into Blender's interface, providing access to hole detection and filling operations from the sidebar panel. This guide covers installation, configuration, and usage.
 
 ![Blender Addon Banner](images/blender-banner-placeholder.png)
 *<!-- PLACEHOLDER: Hero image showing the addon panel in Blender with a repaired mesh -->*
@@ -11,32 +11,30 @@ MeshRepair for Blender brings professional-grade hole filling and mesh cleanup d
 
 ## Table of Contents
 
-- [Features at a Glance](#features-at-a-glance)
+- [Feature Summary](#feature-summary)
 - [Installation](#installation)
-- [Getting Started](#getting-started)
-- [The Interface](#the-interface)
-- [Quick Repair (Recommended)](#quick-repair-recommended)
-- [Step-by-Step Repair](#step-by-step-repair)
-- [Working in Edit Mode](#working-in-edit-mode)
-- [Understanding the Options](#understanding-the-options)
-- [Preprocessing Settings](#preprocessing-settings)
-- [Hole Filling Settings](#hole-filling-settings)
-- [Reading the Results](#reading-the-results)
-- [Tips for Best Results](#tips-for-best-results)
+- [Interface Overview](#interface-overview)
+- [Preset Operations](#preset-operations)
+- [Manual Operations](#manual-operations)
+- [Edit Mode Operations](#edit-mode-operations)
+- [Preprocessing Options](#preprocessing-options)
+- [Hole Filling Options](#hole-filling-options)
+- [Results and Statistics](#results-and-statistics)
+- [Configuration Guidelines](#configuration-guidelines)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Features at a Glance
+## Feature Summary
 
 | Feature | Description |
 |---------|-------------|
-| **One-Click Repair** | Fast, Quality, or High Quality presets |
-| **Edit Mode Support** | Repair only selected faces |
-| **Smart Cleanup** | Automatic topology fixes |
-| **Live Statistics** | See exactly what was fixed |
-| **Non-Destructive** | Full undo support |
-| **Fast Processing** | Multi-threaded engine |
+| **Preset Modes** | C⁰, C¹, C² continuity presets |
+| **Edit Mode Support** | Process selected faces only |
+| **Preprocessing** | Topology cleanup before hole filling |
+| **Statistics Display** | Operation results and timing |
+| **Undo Support** | Full integration with Blender's undo system |
+| **Multi-threaded** | Parallel processing via external engine |
 
 ![Features Overview](images/features-overview-placeholder.png)
 *<!-- PLACEHOLDER: Annotated screenshot showing key features of the addon -->*
@@ -45,11 +43,11 @@ MeshRepair for Blender brings professional-grade hole filling and mesh cleanup d
 
 ## Installation
 
-### Step 1: Get the Engine
+### Step 1: Install the Engine
 
-The addon requires the MeshRepair engine to be installed:
+The addon requires the MeshRepair engine executable:
 
-1. Download the latest release from [GitHub Releases](https://github.com/your-repo/meshrepair/releases)
+1. Download from [GitHub Releases](https://github.com/your-repo/meshrepair/releases)
 2. Extract to a permanent location:
    - **Windows**: `C:\Program Files\MeshRepair\`
    - **Linux**: `/usr/local/bin/` or `~/meshrepair/`
@@ -57,433 +55,389 @@ The addon requires the MeshRepair engine to be installed:
 
 ### Step 2: Install the Addon
 
-1. Download `meshrepair_blender.zip` from the releases page
-2. In Blender, go to **Edit → Preferences → Add-ons**
-3. Click **Install...** and select the downloaded ZIP file
-4. Enable the addon by checking the box next to "Mesh: MeshRepair"
+1. Download `meshrepair_blender.zip` from releases
+2. In Blender: **Edit → Preferences → Add-ons**
+3. Click **Install...** and select the ZIP file
+4. Enable "Mesh: MeshRepair"
 
 ![Addon Installation](images/addon-install-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot of Blender preferences with addon installation highlighted -->*
 
-### Step 3: Configure the Engine
+### Step 3: Configure Engine Path
 
-1. In the addon preferences, click **Detect Engine**
-2. If auto-detection fails, manually browse to the `meshrepair` executable
-3. Click **Test Engine** to verify the connection
+1. In addon preferences, click **Detect Engine** for automatic detection
+2. If detection fails, manually browse to the `meshrepair` executable
+3. Click **Test Engine** to verify connectivity
 
 ![Engine Configuration](images/engine-config-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot of addon preferences showing engine path configuration -->*
 
-### Verify Installation
+### Verification
 
-You should see:
-- ✓ Green checkmark next to "Engine Status: Ready"
-- Engine version number displayed
+The Engine Status panel should display:
+- Status: Ready (green indicator)
+- Engine version number
 
 ---
 
-## Getting Started
+## Interface Overview
 
-### Opening the Panel
+### Panel Location
 
-1. Select a mesh object in Object Mode (or Edit Mode)
-2. Open the sidebar with **N** key
-3. Click the **Mesh Repair** tab
+1. Select a mesh object
+2. Press **N** to open the sidebar
+3. Select the **Mesh Repair** tab
 
 ![Panel Location](images/panel-location-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot showing how to find the Mesh Repair panel in the sidebar -->*
 
-### Your First Repair
-
-1. Select a mesh with holes
-2. Click **Quality Repair**
-3. Done! Check the results panel for statistics
-
-![First Repair](images/first-repair-placeholder.png)
-*<!-- PLACEHOLDER: Before/after screenshots of a simple repair in Blender -->*
-
----
-
-## The Interface
-
-### Main Panel Overview
+### Panel Structure
 
 ![Interface Overview](images/interface-overview-placeholder.png)
 *<!-- PLACEHOLDER: Annotated screenshot of the full addon interface -->*
 
-| Section | Purpose |
-|---------|---------|
-| **Engine Status** | Shows if engine is ready (expandable) |
-| **Context Info** | Current mode and mesh/selection info |
-| **Quick Presets** | One-click repair buttons |
-| **Custom Mode** | Step-by-step controls |
-| **Preprocessing Options** | Mesh cleanup settings |
-| **Hole Filling Options** | Quality and size settings |
+| Section | Function |
+|---------|----------|
+| **Engine Status** | Connection status and version (collapsible) |
+| **Context Info** | Current mode and mesh/selection data |
+| **Operation Buttons** | Preset or manual operation controls |
+| **Preprocessing Options** | Topology cleanup settings (collapsible) |
+| **Hole Filling Options** | Algorithm parameters (collapsible) |
 | **Results** | Statistics from last operation |
 
-### Mode Indicator
+### Context Display
 
-The panel shows your current context:
+The panel displays context information based on current mode:
 
-| Mode | Display |
-|------|---------|
-| **Object Mode** | Object name + total faces |
-| **Edit Mode** | Selected faces / Total faces |
-| **No Mesh Selected** | Warning message |
+| Mode | Information Displayed |
+|------|----------------------|
+| **Object Mode** | Object name, total face count |
+| **Edit Mode** | Selected faces / total faces, scope selector |
+| **No Selection** | Warning message |
 
 ![Mode Indicator](images/mode-indicator-placeholder.png)
 *<!-- PLACEHOLDER: Three screenshots showing different mode states -->*
 
 ---
 
-## Quick Repair (Recommended)
+## Preset Operations
 
-For most users, the quick preset buttons are all you need:
+For standard use cases, preset buttons provide configured parameter combinations:
 
-### Fast Repair
+### C⁰ (Fast)
 
 ![Fast Repair Button](images/fast-repair-button-placeholder.png)
 *<!-- PLACEHOLDER: Close-up of Fast Repair button -->*
 
-```
-Speed: ★★★★★
-Quality: ★★☆☆☆
-```
+| Parameter | Value |
+|-----------|-------|
+| Continuity | C⁰ (positional) |
+| Refinement | Disabled |
+| Cubic Search | Skipped |
 
-**Best for:**
-- Quick previews
-- Large meshes (100K+ triangles)
-- Non-critical repairs
-- Speed testing
+Suitable for: Preview, large meshes, non-critical repairs
 
-**Settings used:**
-- C⁰ continuity (positional only)
-- No mesh refinement
-- Skip expensive algorithms
+### C¹ (Standard)
 
-### Quality Repair
-
-![Quality Repair Button](images/quality-repair-button-placeholder.png)
+![Standard Repair Button](images/quality-repair-button-placeholder.png)
 *<!-- PLACEHOLDER: Close-up of Quality Repair button -->*
 
-```
-Speed: ★★★☆☆
-Quality: ★★★★☆
-```
+| Parameter | Value |
+|-----------|-------|
+| Continuity | C¹ (tangent) |
+| Refinement | Enabled |
+| Cubic Search | Normal |
 
-**Best for:**
-- Most everyday repairs
-- Game assets
-- General 3D work
-- Balanced quality/speed
+Suitable for: General use, balanced quality and performance
 
-**Settings used:**
-- C¹ continuity (smooth tangents)
-- Mesh refinement enabled
-- Standard algorithms
-
-### High Quality Repair
+### C² (High Quality)
 
 ![High Quality Repair Button](images/highquality-repair-button-placeholder.png)
 *<!-- PLACEHOLDER: Close-up of High Quality Repair button -->*
 
-```
-Speed: ★★☆☆☆
-Quality: ★★★★★
-```
+| Parameter | Value |
+|-----------|-------|
+| Continuity | C² (curvature) |
+| Refinement | Enabled |
+| Cubic Search | Normal |
 
-**Best for:**
-- Hero assets
-- 3D printing preparation
-- Medical/scientific models
-- Final production meshes
+Suitable for: Final output, additive manufacturing, high-fidelity requirements
 
-**Settings used:**
-- C² continuity (smooth curvature)
-- Full mesh refinement
-- All quality algorithms
+### Continuity Comparison
 
-### Visual Quality Comparison
-
-![Quality Comparison](images/blender-quality-comparison-placeholder.png)
-*<!-- PLACEHOLDER: Side-by-side render of same hole filled with Fast/Quality/High Quality -->*
+![Continuity Comparison](images/blender-quality-comparison-placeholder.png)
+*<!-- PLACEHOLDER: Side-by-side render of same hole filled with C⁰/C¹/C² -->*
 
 ---
 
-## Step-by-Step Repair
+## Manual Operations
 
-For more control, switch to **Custom** mode:
+For fine control, switch to **Custom** mode:
 
 ![Custom Mode](images/custom-mode-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot of Custom mode interface -->*
 
-### Step 1: Preprocess Mesh
+### Operation Sequence
 
-Click **Preprocess Mesh** to clean up topology issues:
+#### 1. Preprocess Mesh
+
+Executes topology cleanup operations.
 
 ![Preprocess Step](images/preprocess-step-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot showing preprocessing button and results -->*
 
-This fixes:
-- Duplicate vertices at same location
-- Non-manifold edges and vertices
-- 3-triangle fans around single vertices
-- Isolated (floating) vertices
+Operations performed:
+- Duplicate vertex merging
+- Non-manifold geometry removal
+- 3-face fan collapse
+- Isolated vertex removal
 
-**When to use:**
-- Imported meshes from other software
-- 3D scans with artifacts
-- Meshes with known topology issues
+#### 2. Detect Holes
 
-### Step 2: Detect Holes
-
-Click **Detect Holes** to analyze the mesh:
+Analyzes mesh and reports hole count.
 
 ![Detect Step](images/detect-step-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot showing detect button and hole count results -->*
 
-The results show:
-- Total number of holes found
-- This helps you decide on filling strategy
+Output:
+- Total holes detected
+- Hole size distribution
 
-### Step 3: Fill Holes
+#### 3. Fill Holes
 
-Click **Fill Holes** to repair all detected holes:
+Fills detected holes using configured parameters.
 
 ![Fill Step](images/fill-step-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot showing fill button and results -->*
 
-The results show:
-- Holes successfully filled
-- Holes that failed (usually degenerate geometry)
+Output:
+- Holes filled successfully
+- Holes failed
 - Holes skipped (exceeded size limits)
-- Vertices and faces added
+- Geometry added (vertices, faces)
 
 ---
 
-## Working in Edit Mode
+## Edit Mode Operations
 
-One of MeshRepair's most powerful features is **Edit Mode support**—repair only the parts you select!
+The addon supports processing selected regions in Edit Mode.
 
-### Why Use Edit Mode?
+### Use Cases
 
-| Use Case | Benefit |
+| Scenario | Benefit |
 |----------|---------|
-| **Selective repair** | Only fix specific areas |
-| **Preserve features** | Keep intentional openings |
-| **Large meshes** | Process smaller regions faster |
-| **Iterative workflow** | Fix problems one at a time |
+| **Selective repair** | Process specific areas only |
+| **Preserve intentional openings** | Skip holes that should remain open |
+| **Large mesh processing** | Reduce computation by limiting scope |
+| **Iterative workflow** | Address problems incrementally |
 
-### Scope Options
+### Scope Selection
 
-When in Edit Mode, you'll see the **Scope** option:
+In Edit Mode, the **Scope** option controls processing extent:
 
 ![Scope Options](images/scope-options-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot showing Selection vs Whole Mesh radio buttons -->*
 
 | Option | Behavior |
 |--------|----------|
-| **Selection** | Only process selected faces |
-| **Whole Mesh** | Process entire mesh (ignore selection) |
+| **Selection** | Process selected faces and detected holes within |
+| **Whole Mesh** | Process entire mesh regardless of selection |
 
 ### Selection Workflow
 
-1. **Enter Edit Mode** (Tab key)
-2. **Select faces** around holes you want to fill (face select mode: 3)
-3. **Include surrounding area** (the addon auto-expands, but more is better)
-4. Click **Repair**
+1. Enter Edit Mode (Tab)
+2. Switch to Face Select mode (3)
+3. Select faces surrounding holes to repair
+4. Include adequate surrounding geometry for blending
+5. Execute repair operation
 
 ![Edit Mode Selection](images/editmode-selection-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot showing face selection around a hole -->*
 
 ### Selection Expansion
 
-The addon automatically expands your selection to include enough surrounding geometry for smooth blending. You can control this:
+The addon automatically expands selection to include neighboring geometry for smooth blending. Control this behavior with the expansion parameter:
 
 ![Selection Expansion](images/selection-expansion-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot showing the expansion slider -->*
 
-| Setting | Effect |
-|---------|--------|
-| **Auto (-1)** | Automatically calculated based on quality |
-| **0** | No expansion (exact selection only) |
+| Value | Behavior |
+|-------|----------|
+| **-1 (Auto)** | Calculated based on continuity level |
+| **0** | No expansion (exact selection) |
 | **1-8** | Manual expansion iterations |
 
-**Tip:** Higher expansion = smoother blending but slower processing
+Higher values provide smoother blending at increased computation cost.
 
-### Important: Selection Boundaries
+### Selection Boundary Handling
 
-When working with selections, the addon is smart about boundaries:
+The addon distinguishes between:
+- **Selection boundaries**: Edges of the selected region (not holes)
+- **Actual holes**: Gaps in the mesh surface
 
 ![Selection Boundary](images/selection-boundary-placeholder.png)
 *<!-- PLACEHOLDER: Diagram showing selection boundary vs actual holes -->*
 
-- **Selection boundary** = Edge of your selection (NOT a hole)
-- **Actual holes** = Gaps in the mesh surface
-
-The addon automatically distinguishes between these and only fills actual holes.
+Selection boundaries are automatically excluded from hole filling.
 
 ---
 
-## Understanding the Options
+## Preprocessing Options
 
-### Preprocessing Panel
-
-Click to expand preprocessing options:
+Expand the Preprocessing panel to access cleanup settings:
 
 ![Preprocessing Panel](images/preprocessing-panel-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot of expanded preprocessing options -->*
 
-#### Quick Presets
+### Presets
 
 | Preset | Description |
 |--------|-------------|
-| **Light** | Basic cleanup (duplicates + isolated only) |
-| **Full** | Complete cleanup (all options enabled) |
+| **Light** | Duplicates and isolated vertices only |
+| **Full** | All cleanup operations enabled |
 
-#### Individual Options
+### Individual Operations
 
-| Option | What it does | When to enable |
-|--------|--------------|----------------|
-| **Remove Duplicates** | Merges vertices at same location | Always (default) |
-| **Remove Non-Manifold** | Fixes impossible geometry | Imported/scanned meshes |
-| **Remove 3-Face Fans** | Cleans up pinch points | Problematic topology |
-| **Remove Isolated** | Deletes floating vertices | Always (default) |
-| **Keep Largest Only** | Removes small fragments | Scans with debris |
+| Option | Description | Default |
+|--------|-------------|---------|
+| **Remove Duplicates** | Merge coincident vertices | Enabled |
+| **Remove Non-Manifold** | Remove invalid topology | Enabled |
+| **Remove 3-Face Fans** | Collapse degenerate configurations | Enabled |
+| **Remove Isolated** | Delete unconnected vertices | Enabled |
+| **Keep Largest Only** | Remove small disconnected components | Disabled |
 
-#### Advanced Settings
+### Advanced Parameters
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Non-Manifold Depth** | 10 | How aggressively to search for issues |
-| **Duplicate Threshold** | 0.0001 | Distance to consider "same location" |
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| **Non-Manifold Depth** | 10 | 1-20 | Search recursion limit |
+| **Duplicate Threshold** | 0.0001 | 0.0-1.0 | Distance for coincidence detection |
 
 ---
 
-## Hole Filling Settings
+## Hole Filling Options
 
-Click to expand hole filling options:
+Expand the Hole Filling panel to access algorithm parameters:
 
 ![Filling Panel](images/filling-panel-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot of expanded hole filling options -->*
 
-### Hole Size Limits
+### Size Limits
 
-Control which holes get filled:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| **Max Boundary** | 1000 | Maximum hole boundary vertices |
+| **Max Diameter** | 0.1 | Maximum diameter as ratio of mesh bbox |
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Max Boundary** | 1000 | Maximum vertices around hole edge |
-| **Max Diameter** | 0.1 | Maximum hole size (10% of mesh) |
+Holes exceeding these limits are skipped.
 
 ![Size Limits Visual](images/size-limits-visual-placeholder.png)
 *<!-- PLACEHOLDER: Visual showing small holes filled, large hole skipped -->*
 
-**Use cases:**
-- Set higher limits for 3D scans with large gaps
-- Set lower limits to skip intentional openings
+### Quality Parameters
 
-### Quality Settings
-
-| Setting | Options | Description |
-|---------|---------|-------------|
+| Parameter | Options | Description |
+|-----------|---------|-------------|
 | **Continuity** | C⁰, C¹, C² | Surface smoothness level |
-| **Refine Mesh** | On/Off | Add vertices to match density |
+| **Refine Mesh** | On/Off | Match local triangle density |
 
-#### Continuity Explained
+### Continuity Levels
 
 ![Continuity Comparison](images/continuity-comparison-placeholder.png)
 *<!-- PLACEHOLDER: Visual showing C⁰/C¹/C² differences on same hole -->*
 
-| Level | Name | Visual Effect | Performance |
-|-------|------|---------------|-------------|
-| **C⁰** | Positional | Flat patch, may show edges | Fastest |
-| **C¹** | Tangent | Smooth blend, good quality | Balanced |
-| **C²** | Curvature | Seamless blend, best quality | Slowest |
+| Level | Description | Computation |
+|-------|-------------|-------------|
+| **C⁰** | Positional continuity | Low |
+| **C¹** | Tangent continuity | Medium |
+| **C²** | Curvature continuity | High |
 
-### Algorithm Settings
+### Algorithm Parameters
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Use 2D Triangulation** | On | Primary fill method |
-| **Use 3D Delaunay** | On | Fallback for complex holes |
-| **Skip Cubic Search** | Off | Skip expensive algorithm |
-| **Partitioned Parallel** | On | Multi-threaded processing |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| **Use 2D Triangulation** | Enabled | Primary triangulation method |
+| **Use 3D Delaunay** | Enabled | Fallback triangulation |
+| **Skip Cubic Search** | Disabled | Skip exhaustive algorithm |
+| **Partitioned Parallel** | Enabled | Multi-threaded processing |
 
-**Tip:** Leave defaults unless troubleshooting specific issues.
+Default values are suitable for most cases.
 
 ---
 
-## Reading the Results
+## Results and Statistics
 
-After any operation, check the **Results** panel:
+After operations, the **Results** panel displays statistics:
 
 ![Results Panel](images/results-panel-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot of results panel with all statistics -->*
 
-### Summary Section
+### Summary
 
-| Field | Meaning |
-|-------|---------|
-| **Operation** | What was performed |
-| **Status** | Success or error message |
-| **Time** | How long it took |
+| Field | Description |
+|-------|-------------|
+| **Operation** | Type of operation performed |
+| **Status** | Success or error indication |
+| **Time** | Execution duration |
 
-### Preprocessing Results
+### Preprocessing Statistics
 
-| Statistic | Meaning |
-|-----------|---------|
-| **Duplicates** | Vertices merged together |
-| **Non-manifold** | Problematic geometry removed |
-| **3-Face Fans** | Pinch points cleaned up |
-| **Isolated** | Floating vertices removed |
+| Statistic | Description |
+|-----------|-------------|
+| **Duplicates** | Vertices merged |
+| **Non-manifold** | Invalid geometry removed |
+| **3-Face Fans** | Configurations collapsed |
+| **Isolated** | Unconnected vertices removed |
 
-### Hole Filling Results
+### Hole Filling Statistics
 
-| Statistic | Meaning | Good Value |
-|-----------|---------|------------|
-| **Detected** | Total holes found | Any |
-| **Filled** | Successfully repaired | = Detected |
-| **Failed** | Couldn't repair | 0 |
-| **Skipped** | Exceeded size limits | 0 (or intentional) |
-| **Vertices Added** | New geometry | Depends on holes |
-| **Faces Added** | New triangles | Depends on holes |
+| Statistic | Description |
+|-----------|-------------|
+| **Detected** | Total holes found |
+| **Filled** | Successfully repaired |
+| **Failed** | Unable to repair |
+| **Skipped** | Exceeded size limits |
+| **Vertices Added** | New vertices created |
+| **Faces Added** | New triangles created |
 
 ---
 
-## Tips for Best Results
+## Configuration Guidelines
 
-### For 3D Scans
+### 3D Scans
 
 ![3D Scan Tips](images/scan-tips-placeholder.png)
 *<!-- PLACEHOLDER: Annotated 3D scan showing problem areas -->*
 
-1. **Start with preprocessing** - Scans often have debris and artifacts
-2. **Enable "Keep Largest Only"** - Removes floating fragments
-3. **Use High Quality mode** - Scans benefit from smooth fills
-4. **Increase Max Diameter** - Scans often have large occlusion gaps
+Recommended settings:
+1. Enable preprocessing with all options
+2. Enable "Keep Largest Only" to remove debris
+3. Use C² continuity for smooth fills
+4. Increase Max Diameter for large occlusion gaps
 
-### For Game Assets
+### Game Assets
 
-1. **Use Quality mode** - Good balance for real-time rendering
-2. **Check triangle count** - Refinement adds geometry
-3. **Work in Edit Mode** - Repair specific areas as needed
+Recommended settings:
+1. Use C¹ continuity (balance of quality and performance)
+2. Monitor triangle count (refinement adds geometry)
+3. Use Edit Mode for targeted repairs
 
-### For 3D Printing
+### Additive Manufacturing
 
-1. **Use High Quality mode** - Smooth surfaces print better
-2. **Enable mesh refinement** - Consistent triangle size
-3. **Run preprocessing** - Ensure watertight result
-4. **Verify in Blender** - Use Mesh Analysis to check
+Recommended settings:
+1. Use C² continuity for smooth surfaces
+2. Enable mesh refinement
+3. Run preprocessing to ensure manifold output
+4. Verify result with Blender's Mesh Analysis
 
-### General Best Practices
+### General Guidelines
 
-| Do | Don't |
-|----|-------|
-| ✓ Save before repairing | ✗ Work on original file |
-| ✓ Start with Quality preset | ✗ Jump to manual settings |
-| ✓ Use Edit Mode for large meshes | ✗ Process million-poly meshes whole |
-| ✓ Check results statistics | ✗ Ignore failed holes |
+| Recommendation | Rationale |
+|----------------|-----------|
+| Save before repair | Undo support exists, but saves provide fallback |
+| Start with presets | Adjust parameters only if results are unsatisfactory |
+| Use Edit Mode for large meshes | Reduces computation by limiting scope |
+| Check statistics | Non-zero failed count indicates potential issues |
 
 ---
 
@@ -494,87 +448,64 @@ After any operation, check the **Results** panel:
 ![Engine Not Found](images/engine-notfound-placeholder.png)
 *<!-- PLACEHOLDER: Screenshot of error state -->*
 
-**Solution:**
-1. Go to addon preferences
+Resolution:
+1. Open addon preferences
 2. Click **Detect Engine** or browse manually
-3. Ensure the executable has run permissions (Linux/macOS)
+3. On Linux/macOS: verify executable permissions (`chmod +x meshrepair`)
 
 ### No Holes Detected
 
-**Possible causes:**
-- Mesh is already watertight
-- Holes exceed size limits
-- Mesh needs preprocessing first
+Possible causes:
+- Mesh is watertight
+- All holes exceed size limits
+- Preprocessing required
 
-**Solution:**
-```
-1. Run Preprocess first
-2. Increase Max Boundary and Max Diameter
-3. Check mesh in Edit Mode (select all, look for boundaries)
-```
+Resolution:
+1. Run preprocessing first
+2. Increase Max Boundary and Max Diameter values
+3. Inspect mesh in Edit Mode (Select All, check for boundaries)
 
-### Some Holes Failed
+### Filling Failures
 
-**Possible causes:**
-- Degenerate geometry (zero-area triangles)
-- Self-intersecting boundaries
-- Very complex hole shapes
+Possible causes:
+- Degenerate geometry
+- Self-intersecting hole boundaries
+- Complex non-planar holes
 
-**Solution:**
-```
-1. Try disabling "Use 2D Triangulation"
-2. Run preprocessing with all options
-3. Manually fix problem areas in Edit Mode
-```
+Resolution:
+1. Disable "Use 2D Triangulation"
+2. Run full preprocessing
+3. Repair problematic areas manually in Edit Mode
 
-### Slow Performance
+### Performance Issues
 
-**Solution:**
-```
-1. Use Fast preset for initial tests
-2. Work in Edit Mode on large meshes
-3. Reduce Max Boundary to skip huge holes
-4. Check thread count in preferences
-```
+Resolution:
+1. Use C⁰ preset for initial testing
+2. Process large meshes in sections using Edit Mode
+3. Reduce Max Boundary to skip large holes
+4. Verify thread count in addon preferences
 
 ### Unexpected Results
 
 ![Unexpected Results](images/unexpected-results-placeholder.png)
 *<!-- PLACEHOLDER: Example of a problem result -->*
 
-**Solution:**
-```
-1. Undo (Ctrl+Z) and try different settings
-2. Use Edit Mode to repair section by section
-3. Try preprocessing first
-4. Check for overlapping geometry
-```
+Resolution:
+1. Undo (Ctrl+Z) and adjust parameters
+2. Use Edit Mode for section-by-section repair
+3. Run preprocessing before filling
+4. Check for overlapping or self-intersecting geometry
 
-### Getting Debug Info
+### Debug Information
 
-For bug reports, enable verbose output:
+For issue reporting, enable verbose output:
 
-1. Go to addon preferences
+1. Open addon preferences
 2. Set **Verbosity** to 3 (Debug) or 4 (Trace)
-3. Open **Window → Toggle System Console** (Windows) or launch Blender from terminal
-4. Run the operation and check console output
-
----
-
-## Keyboard Shortcuts
-
-The addon doesn't install default shortcuts, but you can add them:
-
-1. Right-click any button
-2. Select **Assign Shortcut**
-3. Press your desired key combination
-
-**Suggested shortcuts:**
-| Action | Suggested Key |
-|--------|---------------|
-| Quality Repair | Ctrl+Shift+R |
-| Preprocess | Ctrl+Shift+P |
-| Detect Holes | Ctrl+Shift+D |
+3. Open system console:
+   - Windows: **Window → Toggle System Console**
+   - Linux/macOS: Launch Blender from terminal
+4. Execute operation and capture console output
 
 ---
 
@@ -589,43 +520,37 @@ Access via **Edit → Preferences → Add-ons → Mesh: MeshRepair**
 
 | Setting | Description |
 |---------|-------------|
-| **Engine Path** | Location of meshrepair executable |
-| **Detect Engine** | Auto-find the engine |
-| **Test Engine** | Verify connection |
+| **Engine Path** | Path to meshrepair executable |
+| **Detect Engine** | Automatic path detection |
+| **Test Engine** | Verify engine connectivity |
 
 ### Performance
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Thread Count** | 8 | Worker threads (0 = auto) |
+| **Thread Count** | 8 | Worker threads (0 = automatic) |
 
 ### Debugging
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Verbosity** | 1 (Info) | Output detail level |
-| **Temp Directory** | Empty | Location for debug files |
-| **Socket Mode** | Off | Advanced: TCP connection |
+| **Verbosity** | 1 (Info) | Output detail level (0-4) |
+| **Temp Directory** | Empty | Debug file output location |
+| **Socket Mode** | Disabled | TCP connection (for debugging) |
 
 ---
 
-## Version History
+## Related Documentation
 
-| Version | Changes |
-|---------|---------|
-| 1.0.0 | Initial release |
-| 1.1.0 | Added Edit Mode support |
-| 1.2.0 | Selection boundary detection |
+- [CLI Guide](cli-guide.md) - Command-line interface usage
+- [Index](index.md) - Project overview
 
 ---
 
-## Need More Help?
+## References
 
-- **Command Line Users**: See the [CLI Guide](cli-guide.md)
-- **Developers**: Check the [API Reference](api-reference.md)
-- **Bug Reports**: [GitHub Issues](https://github.com/your-repo/meshrepair/issues)
-- **Community**: [Blender Artists Thread](https://blenderartists.org/)
+Hole filling algorithm:
+> Peter Liepa. "Filling Holes in Meshes." *Eurographics Symposium on Geometry Processing*, 2003.
 
----
-
-*MeshRepair for Blender is licensed under GPL v2.0, compatible with Blender's license.*
+Fairing algorithm:
+> Mario Botsch et al. "On Linear Variational Surface Deformation Methods." *IEEE Transactions on Visualization and Computer Graphics*, 2008.
