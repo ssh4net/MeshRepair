@@ -1,4 +1,4 @@
-# MeshHoleFiller
+# Mesh Repair
 
 A cross-platform CLI tool for filling holes in triangle meshes using CGAL's implementation of the Liepa 2003 algorithm with Laplacian (harmonic) fairing.
 
