@@ -2,9 +2,9 @@
 
 # Site settings
 title: MeshRepair Documentation
-description: Professional mesh hole filling for 3D artists, game developers, and scanning professionals
-baseurl: "/meshrepair" # Change to your repo name
-url: "https://yourusername.github.io" # Change to your GitHub Pages URL
+description: 3D Mesh Repair
+baseurl: "/MeshRepair" # Change to your repo name
+url: "https://ssh4net.github.io" # Change to your GitHub Pages URL
 
 # Theme
 theme: jekyll-theme-midnight
