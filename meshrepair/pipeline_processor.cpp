@@ -37,17 +37,17 @@ PipelineProcessor::process_pipeline(bool verbose)
     std::mutex results_mutex;
 
     if (verbose) {
-        std::cout << "[Pipeline] Starting detection and filling in parallel\n";
-        std::cout << "[Pipeline] Detection: " << thread_manager_.get_detection_threads() << " thread(s)\n";
-        std::cout << "[Pipeline] Filling: " << thread_manager_.get_filling_threads() << " thread(s)\n";
-        std::cout << "[Pipeline] Queue size: " << thread_manager_.get_queue_size() << " holes\n\n";
+        std::cerr << "[Pipeline] Starting detection and filling in parallel\n";
+        std::cerr << "[Pipeline] Detection: " << thread_manager_.get_detection_threads() << " thread(s)\n";
+        std::cerr << "[Pipeline] Filling: " << thread_manager_.get_filling_threads() << " thread(s)\n";
+        std::cerr << "[Pipeline] Queue size: " << thread_manager_.get_queue_size() << " holes\n\n";
     }
 
     // Start detection in background (producer)
     auto& detection_pool = thread_manager_.get_detection_pool();
 
     if (verbose) {
-        std::cout << "[Pipeline] Enqueueing detection task...\n";
+        std::cerr << "[Pipeline] Enqueueing detection task...\n";
     }
 
     auto detection_future = detection_pool.enqueue([this, &hole_queue, &detection_done, &holes_detected, verbose]() {
@@ -61,7 +61,7 @@ PipelineProcessor::process_pipeline(bool verbose)
     });
 
     if (verbose) {
-        std::cout << "[Pipeline] Detection task enqueued\n";
+        std::cerr << "[Pipeline] Detection task enqueued\n";
     }
 
     // Start filling threads (consumers)
@@ -69,12 +69,12 @@ PipelineProcessor::process_pipeline(bool verbose)
     std::vector<std::future<void>> filling_futures;
 
     if (verbose) {
-        std::cout << "[Pipeline] Enqueueing " << thread_manager_.get_filling_threads() << " filling tasks...\n";
+        std::cerr << "[Pipeline] Enqueueing " << thread_manager_.get_filling_threads() << " filling tasks...\n";
     }
 
     for (size_t i = 0; i < thread_manager_.get_filling_threads(); ++i) {
         if (verbose) {
-            std::cout << "[Pipeline] Enqueueing filling task " << i << "...\n";
+            std::cerr << "[Pipeline] Enqueueing filling task " << i << "...\n";
         }
 
         filling_futures.push_back(
@@ -89,27 +89,27 @@ PipelineProcessor::process_pipeline(bool verbose)
             }));
 
         if (verbose) {
-            std::cout << "[Pipeline] Filling task " << i << " enqueued\n";
+            std::cerr << "[Pipeline] Filling task " << i << " enqueued\n";
         }
     }
 
     if (verbose) {
-        std::cout << "[Pipeline] All tasks enqueued\n";
+        std::cerr << "[Pipeline] All tasks enqueued\n";
     }
 
     // Wait for detection to complete
     if (verbose) {
-        std::cout << "[Pipeline] Waiting for detection thread to complete...\n";
+        std::cerr << "[Pipeline] Waiting for detection thread to complete...\n";
     }
 
     try {
         detection_future.get();
 
         if (verbose) {
-            std::cout << "[Pipeline] Detection thread completed successfully\n";
+            std::cerr << "[Pipeline] Detection thread completed successfully\n";
         }
     } catch (const std::exception& e) {
-        std::cout << "[Pipeline] ERROR: Detection thread threw exception: " << e.what() << "\n";
+        std::cerr << "[Pipeline] ERROR: Detection thread threw exception: " << e.what() << "\n";
         // Signal filling threads to stop
         hole_queue.finish();
         // Wait for filling threads to exit
@@ -121,7 +121,7 @@ PipelineProcessor::process_pipeline(bool verbose)
         }
         throw;  // Re-throw to caller
     } catch (...) {
-        std::cout << "[Pipeline] ERROR: Detection thread threw unknown exception\n";
+        std::cerr << "[Pipeline] ERROR: Detection thread threw unknown exception\n";
         hole_queue.finish();
         for (auto& f : filling_futures) {
             try {
@@ -134,38 +134,38 @@ PipelineProcessor::process_pipeline(bool verbose)
 
     // Signal filling threads that no more holes are coming
     if (verbose) {
-        std::cout << "[Pipeline] About to call hole_queue.finish()...\n";
+        std::cerr << "[Pipeline] About to call hole_queue.finish()...\n";
     }
 
     hole_queue.finish();
 
     if (verbose) {
-        std::cout << "[Pipeline] hole_queue.finish() completed, waiting for filling to finish...\n";
+        std::cerr << "[Pipeline] hole_queue.finish() completed, waiting for filling to finish...\n";
     }
 
     // Wait for all filling to complete
     if (verbose) {
-        std::cout << "[Pipeline] Waiting for " << filling_futures.size() << " filling thread(s) to complete...\n";
+        std::cerr << "[Pipeline] Waiting for " << filling_futures.size() << " filling thread(s) to complete...\n";
     }
 
     for (size_t i = 0; i < filling_futures.size(); ++i) {
         try {
             if (verbose) {
-                std::cout << "[Pipeline] Waiting for filling thread " << i << "...\n";
+                std::cerr << "[Pipeline] Waiting for filling thread " << i << "...\n";
             }
             filling_futures[i].get();
             if (verbose) {
-                std::cout << "[Pipeline] Filling thread " << i << " completed\n";
+                std::cerr << "[Pipeline] Filling thread " << i << " completed\n";
             }
         } catch (const std::exception& e) {
-            std::cout << "[Pipeline] ERROR: Filling thread " << i << " threw exception: " << e.what() << "\n";
+            std::cerr << "[Pipeline] ERROR: Filling thread " << i << " threw exception: " << e.what() << "\n";
         } catch (...) {
-            std::cout << "[Pipeline] ERROR: Filling thread " << i << " threw unknown exception\n";
+            std::cerr << "[Pipeline] ERROR: Filling thread " << i << " threw unknown exception\n";
         }
     }
 
     if (verbose) {
-        std::cout << "[Pipeline] All filling threads completed\n";
+        std::cerr << "[Pipeline] All filling threads completed\n";
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -213,7 +213,7 @@ PipelineProcessor::detect_holes_async(BoundedQueue<HoleInfo>& hole_queue, std::a
         }
 
         if (filling_options_.verbose) {
-            std::cout << "  [Detection] Found " << border_halfedges.size() << " border halfedges\n";
+            std::cerr << "  [Detection] Found " << border_halfedges.size() << " border halfedges\n";
         }
     }
 
@@ -240,7 +240,7 @@ PipelineProcessor::detect_holes_async(BoundedQueue<HoleInfo>& hole_queue, std::a
         size_t count = holes_detected.fetch_add(1) + 1;
 
         if (filling_options_.verbose) {
-            std::cout << "  [Pipeline] Hole " << count << " detected (" << hole.boundary_size
+            std::cerr << "  [Pipeline] Hole " << count << " detected (" << hole.boundary_size
                       << " vertices), queued for filling\n";
         }
     }
@@ -248,7 +248,7 @@ PipelineProcessor::detect_holes_async(BoundedQueue<HoleInfo>& hole_queue, std::a
     detection_done.store(true);
 
     if (filling_options_.verbose) {
-        std::cout << "  [Pipeline] Detection complete: " << holes_detected.load() << " hole(s) found\n";
+        std::cerr << "  [Pipeline] Detection complete: " << holes_detected.load() << " hole(s) found\n";
     }
 }
 
@@ -347,7 +347,7 @@ PipelineProcessor::process_batch(bool verbose)
 {
     // Traditional approach: detect all holes first, then fill
     if (verbose) {
-        std::cout << "[Batch] Detecting all holes first...\n";
+        std::cerr << "[Batch] Detecting all holes first...\n";
     }
 
     HoleDetector detector(mesh_, verbose);
@@ -363,7 +363,7 @@ PipelineProcessor::process_batch(bool verbose)
     }
 
     if (verbose) {
-        std::cout << "[Batch] Filling " << holes.size() << " hole(s)...\n";
+        std::cerr << "[Batch] Filling " << holes.size() << " hole(s)...\n";
     }
 
     // Use all threads for filling

@@ -115,20 +115,19 @@ def export_mesh_to_data(obj, selection_only=False, dilation_iters=0):
                     bm_vert[vert_layer] = bm_vert.index
                     bm_vert_to_mesh_idx[bm_vert] = bm_vert.index
             
-            bm_face_to_poly_idx = {}
+            # Build hash map: frozenset of vertex indices -> polygon index (O(n))
+            poly_vert_hash = {}
             for poly_idx, poly in enumerate(mesh_polys):
-                poly_vert_indices = set(poly.vertices)
-                for bm_face in bm.faces:
-                    if bm_face in bm_face_to_poly_idx:
-                        continue
-                    bm_face_vert_indices = {bm_vert_to_mesh_idx.get(bm_v, -1) for bm_v in bm_face.verts}
-                    if bm_face_vert_indices == poly_vert_indices:
-                        bm_face_to_poly_idx[bm_face] = poly_idx
-                        break
-            
+                key = frozenset(poly.vertices)
+                poly_vert_hash[key] = poly_idx
+
+            # Match bmesh faces to polygon indices using hash lookup (O(n))
             for bm_face in bm.faces:
-                if bm_face in bm_face_to_poly_idx:
-                    bm_face[face_layer] = bm_face_to_poly_idx[bm_face]
+                bm_face_vert_indices = frozenset(
+                    bm_vert_to_mesh_idx.get(bm_v, -1) for bm_v in bm_face.verts
+                )
+                if bm_face_vert_indices in poly_vert_hash:
+                    bm_face[face_layer] = poly_vert_hash[bm_face_vert_indices]
                 else:
                     bm_face[face_layer] = bm_face.index
 

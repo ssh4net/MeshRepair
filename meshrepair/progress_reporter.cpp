@@ -14,7 +14,7 @@ ProgressReporter::start(size_t total_steps, const std::string& operation_name)
     last_reported_percentage_ = 0;
     start_time_               = std::chrono::high_resolution_clock::now();
 
-    std::cout << "\n[" << operation_name_ << "] Starting...\n";
+    std::cerr << "\n[" << operation_name_ << "] Starting...\n";
 }
 
 void
@@ -45,7 +45,7 @@ ProgressReporter::finish()
     auto end_time     = std::chrono::high_resolution_clock::now();
     double total_time = std::chrono::duration<double>(end_time - start_time_).count();
 
-    std::cout << "[" << operation_name_ << "] Completed in " << std::fixed << std::setprecision(2) << total_time
+    std::cerr << "[" << operation_name_ << "] Completed in " << std::fixed << std::setprecision(2) << total_time
               << " seconds\n\n";
 }
 
@@ -55,7 +55,7 @@ ProgressReporter::report(const std::string& message)
     if (!enabled_)
         return;
 
-    std::cout << "[" << operation_name_ << "] " << message << "\n";
+    std::cerr << "[" << operation_name_ << "] " << message << "\n";
 }
 
 void
@@ -65,23 +65,23 @@ ProgressReporter::print_progress_bar(size_t current, size_t total, double elapse
     float progress      = static_cast<float>(current) / total;
     int pos             = static_cast<int>(bar_width * progress);
 
-    std::cout << "[";
+    std::cerr << "[";
     for (int i = 0; i < bar_width; ++i) {
         if (i < pos)
-            std::cout << "=";
+            std::cerr << "=";
         else if (i == pos)
-            std::cout << ">";
+            std::cerr << ">";
         else
-            std::cout << " ";
+            std::cerr << " ";
     }
 
-    std::cout << "] " << int(progress * 100.0) << "% "
+    std::cerr << "] " << int(progress * 100.0) << "% "
               << "(" << current << "/" << total << ") " << std::fixed << std::setprecision(1) << elapsed_seconds
               << "s\r";
-    std::cout.flush();
+    std::cerr.flush();
 
     if (current == total) {
-        std::cout << "\n";
+        std::cerr << "\n";
     }
 }
 

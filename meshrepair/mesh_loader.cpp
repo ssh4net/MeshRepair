@@ -126,15 +126,15 @@ MeshLoader::load_obj_rapidobj(const std::string& filename)
     auto total_time = std::chrono::duration<double, std::milli>(faces_time - start_time).count();
 
     // ========== PHASE 8: Report ==========
-    std::cout << "Loaded mesh from: " << filename << "\n"
+    std::cerr << "Loaded mesh from: " << filename << "\n"
               << "  Vertices: " << mesh.number_of_vertices() << "\n"
               << "  Faces: " << mesh.number_of_faces() << " (added: " << faces_added;
 
     if (faces_failed > 0) {
-        std::cout << ", failed: " << faces_failed;
+        std::cerr << ", failed: " << faces_failed;
     }
 
-    std::cout << ")\n"
+    std::cerr << ")\n"
               << "  Edges: " << mesh.number_of_edges() << "\n"
               << "  Timing:\n"
               << "    Parse: " << std::chrono::duration<double, std::milli>(parse_time - start_time).count() << " ms\n"
@@ -220,7 +220,7 @@ MeshLoader::load_obj_rapidobj_as_soup(const std::string& filename)
     auto end_time = std::chrono::high_resolution_clock::now();
     soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
-    std::cout << "Loaded polygon soup from: " << filename << " (RapidOBJ)\n"
+    std::cerr << "Loaded polygon soup from: " << filename << " (RapidOBJ)\n"
               << "  Points: " << soup.points.size() << "\n"
               << "  Polygons: " << soup.polygons.size() << "\n"
               << "  Load time: " << soup.load_time_ms << " ms\n";
@@ -288,11 +288,11 @@ MeshLoader::load_as_soup(const std::string& filename, Format format, bool force_
     auto end_time = std::chrono::high_resolution_clock::now();
     soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
-    std::cout << "Loaded polygon soup from: " << filename;
+    std::cerr << "Loaded polygon soup from: " << filename;
     if (format == Format::OBJ) {
-        std::cout << " (CGAL OBJ parser)";
+        std::cerr << " (CGAL OBJ parser)";
     }
-    std::cout << "\n"
+    std::cerr << "\n"
               << "  Points: " << soup.points.size() << "\n"
               << "  Polygons: " << soup.polygons.size() << "\n"
               << "  Load time: " << soup.load_time_ms << " ms\n";
@@ -345,11 +345,11 @@ MeshLoader::load(const std::string& filename, Format format, bool force_cgal_loa
         return std::nullopt;
     }
 
-    std::cout << "Loaded mesh from: " << filename;
+    std::cerr << "Loaded mesh from: " << filename;
     if (format == Format::OBJ) {
-        std::cout << " (CGAL OBJ parser)";
+        std::cerr << " (CGAL OBJ parser)";
     }
-    std::cout << "\n"
+    std::cerr << "\n"
               << "  Vertices: " << mesh.number_of_vertices() << "\n"
               << "  Faces: " << mesh.number_of_faces() << "\n"
               << "  Edges: " << mesh.number_of_edges() << "\n";
@@ -390,7 +390,7 @@ MeshLoader::save(const Mesh& mesh, const std::string& filename, Format format, b
         return false;
     }
 
-    std::cout << "Saved mesh to: " << filename << "\n"
+    std::cerr << "Saved mesh to: " << filename << "\n"
               << "  Vertices: " << mesh.number_of_vertices() << "\n"
               << "  Faces: " << mesh.number_of_faces() << "\n";
 

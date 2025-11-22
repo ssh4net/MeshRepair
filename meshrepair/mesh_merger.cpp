@@ -14,7 +14,7 @@ Mesh
 MeshMerger::merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh>& submeshes, bool verbose)
 {
     if (verbose) {
-        std::cout << "[Merger] Merging " << submeshes.size() << " submesh(es) "
+        std::cerr << "[Merger] Merging " << submeshes.size() << " submesh(es) "
                   << "back into original mesh...\n";
     }
 
@@ -36,11 +36,11 @@ MeshMerger::merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh
     }
 
     if (verbose) {
-        std::cout << "[Merger] Converted to soups: " << total_points << " points, " << total_polygons
+        std::cerr << "[Merger] Converted to soups: " << total_points << " points, " << total_polygons
                   << " polygons total\n";
-        std::cout << "[Merger]   Original mesh: " << soups[0].points.size() << " points, " << soups[0].polygons.size()
+        std::cerr << "[Merger]   Original mesh: " << soups[0].points.size() << " points, " << soups[0].polygons.size()
                   << " polygons\n";
-        std::cout << "[Merger]   Filled submeshes: " << (total_points - soups[0].points.size()) << " points, "
+        std::cerr << "[Merger]   Filled submeshes: " << (total_points - soups[0].points.size()) << " points, "
                   << (total_polygons - soups[0].polygons.size()) << " polygons\n";
     }
 
@@ -75,7 +75,7 @@ MeshMerger::merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh
     }
 
     if (verbose) {
-        std::cout << "[Merger] Combined soup: " << combined.points.size() << " points, " << combined.polygons.size()
+        std::cerr << "[Merger] Combined soup: " << combined.points.size() << " points, " << combined.polygons.size()
                   << " polygons\n";
     }
 
@@ -83,7 +83,7 @@ MeshMerger::merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh
     PMP::repair_polygon_soup(combined.points, combined.polygons);
 
     if (verbose) {
-        std::cout << "[Merger] After repair: " << combined.points.size() << " points "
+        std::cerr << "[Merger] After repair: " << combined.points.size() << " points "
                   << "(duplicates merged)\n";
     }
 
@@ -92,7 +92,7 @@ MeshMerger::merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh
 
     if (removed_non_manifold > 0) {
         if (verbose) {
-            std::cout << "[Merger] Removed " << removed_non_manifold << " non-manifold polygon(s)\n";
+            std::cerr << "[Merger] Removed " << removed_non_manifold << " non-manifold polygon(s)\n";
         }
     }
 
@@ -100,14 +100,14 @@ MeshMerger::merge_submeshes(const Mesh& original_mesh, const std::vector<Submesh
     bool oriented = PMP::orient_polygon_soup(combined.points, combined.polygons);
 
     if (!oriented && verbose) {
-        std::cout << "[Merger] Warning: Some points were duplicated during orientation\n";
+        std::cerr << "[Merger] Warning: Some points were duplicated during orientation\n";
     }
 
     // Step 6: Convert back to mesh
     Mesh result = soup_to_mesh(combined);
 
     if (verbose) {
-        std::cout << "[Merger] Final mesh: " << result.number_of_vertices() << " vertices, " << result.number_of_faces()
+        std::cerr << "[Merger] Final mesh: " << result.number_of_vertices() << " vertices, " << result.number_of_faces()
                   << " faces\n";
     }
 

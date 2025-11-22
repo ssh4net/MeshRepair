@@ -76,6 +76,37 @@ class MESHREPAIR_OT_Base(Operator):
         # Also log to console
         console_log(level, message)
 
+    def _check_edit_mode_selection(self, context):
+        """
+        Check if Edit mode has a valid selection when selection scope is enabled.
+
+        Returns:
+            bool: True if OK to proceed, False if should cancel
+        """
+        obj = context.active_object
+        if not obj or obj.mode != 'EDIT':
+            return True  # Object mode - always OK
+
+        props = context.scene.meshrepair_props
+        if getattr(props, "mesh_scope", 'SELECTION') != 'SELECTION':
+            return True  # Full mesh scope - always OK
+
+        # Check if there's any selection in Edit mode
+        bm = bmesh.from_edit_mesh(obj.data)
+        has_selection = (
+            any(f.select for f in bm.faces) or
+            any(e.select for e in bm.edges) or
+            any(v.select for v in bm.verts)
+        )
+
+        if not has_selection:
+            msg = "No selection in Edit mode. Select faces/edges/vertices first, or switch to Object mode."
+            self.report({'ERROR'}, msg)
+            console_log('ERROR', msg)
+            return False
+
+        return True
+
     def _selection_settings(self, context):
         props = context.scene.meshrepair_props
         obj = context.active_object
@@ -131,6 +162,9 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
 
     def execute(self, context):
         if not self.check_engine():
+            return {'CANCELLED'}
+
+        if not self._check_edit_mode_selection(context):
             return {'CANCELLED'}
 
         prefs = get_prefs()
@@ -251,6 +285,9 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
         if not self.check_engine():
             return {'CANCELLED'}
 
+        if not self._check_edit_mode_selection(context):
+            return {'CANCELLED'}
+
         prefs = get_prefs()
         props = context.scene.meshrepair_props
         obj = context.active_object
@@ -335,6 +372,9 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
 
     def execute(self, context):
         if not self.check_engine():
+            return {'CANCELLED'}
+
+        if not self._check_edit_mode_selection(context):
             return {'CANCELLED'}
 
         prefs = get_prefs()
@@ -457,6 +497,9 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
 
     def execute(self, context):
         if not self.check_engine():
+            return {'CANCELLED'}
+
+        if not self._check_edit_mode_selection(context):
             return {'CANCELLED'}
 
         prefs = get_prefs()

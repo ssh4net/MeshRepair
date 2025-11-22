@@ -64,23 +64,23 @@ MeshValidator::get_bbox_diagonal(const Mesh& mesh)
 void
 MeshValidator::print_statistics(const Mesh& mesh, bool detailed)
 {
-    std::cout << "\n=== Mesh Statistics ===\n";
-    std::cout << "  Vertices: " << mesh.number_of_vertices() << "\n";
-    std::cout << "  Faces: " << mesh.number_of_faces() << "\n";
-    std::cout << "  Edges: " << mesh.number_of_edges() << "\n";
-    std::cout << "  Halfedges: " << mesh.number_of_halfedges() << "\n";
+    std::cerr << "\n=== Mesh Statistics ===\n";
+    std::cerr << "  Vertices: " << mesh.number_of_vertices() << "\n";
+    std::cerr << "  Faces: " << mesh.number_of_faces() << "\n";
+    std::cerr << "  Edges: " << mesh.number_of_edges() << "\n";
+    std::cerr << "  Halfedges: " << mesh.number_of_halfedges() << "\n";
 
     if (detailed) {
-        std::cout << "\n=== Validation ===\n";
-        std::cout << "  Valid: " << (is_valid(mesh) ? "YES" : "NO") << "\n";
-        std::cout << "  Triangle mesh: " << (is_triangle_mesh(mesh) ? "YES" : "NO") << "\n";
-        std::cout << "  Closed (watertight): " << (is_closed(mesh) ? "YES" : "NO") << "\n";
+        std::cerr << "\n=== Validation ===\n";
+        std::cerr << "  Valid: " << (is_valid(mesh) ? "YES" : "NO") << "\n";
+        std::cerr << "  Triangle mesh: " << (is_triangle_mesh(mesh) ? "YES" : "NO") << "\n";
+        std::cerr << "  Closed (watertight): " << (is_closed(mesh) ? "YES" : "NO") << "\n";
 
         size_t num_components = count_connected_components(mesh);
-        std::cout << "  Connected components: " << num_components << "\n";
+        std::cerr << "  Connected components: " << num_components << "\n";
 
         double diagonal = get_bbox_diagonal(mesh);
-        std::cout << "  Bounding box diagonal: " << diagonal << "\n";
+        std::cerr << "  Bounding box diagonal: " << diagonal << "\n";
 
         // Count border edges
         size_t border_edges = 0;
@@ -89,10 +89,10 @@ MeshValidator::print_statistics(const Mesh& mesh, bool detailed)
                 ++border_edges;
             }
         }
-        std::cout << "  Border edges: " << border_edges << "\n";
+        std::cerr << "  Border edges: " << border_edges << "\n";
     }
 
-    std::cout << "=======================\n\n";
+    std::cerr << "=======================\n\n";
 }
 
 std::string
