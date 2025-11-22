@@ -200,12 +200,15 @@ class EngineSession:
 
         return response.get('data', {})
 
-    def load_mesh(self, mesh_data):
+    def load_mesh(self, mesh_data, selection_info=None):
         """
         Load mesh into engine (using binary format).
 
         Args:
             mesh_data: Dict with 'vertices' and 'faces' keys (mesh soup format)
+            selection_info: Optional MeshExportResult with selection metadata:
+                - boundary_vertex_flags: List[bool] marking selection boundary vertices
+                - For selection mode: helps engine exclude selection boundaries from hole filling
 
         Returns:
             dict: Response from engine (or queued message in batch mode)
@@ -225,6 +228,24 @@ class EngineSession:
                 "mesh_data_binary": mesh_binary
             }
         }
+
+        # Add selection boundary info if available
+        if selection_info and selection_info.selection_only:
+            # Pass boundary vertex indices (indices of vertices on selection boundary)
+            boundary_indices = [
+                i for i, is_boundary in enumerate(selection_info.boundary_vertex_flags)
+                if is_boundary
+            ]
+            cmd["params"]["boundary_vertex_indices"] = boundary_indices
+
+            # Pass the full object bbox diagonal for proper hole diameter ratio calculation
+            if selection_info.object_bbox_diagonal > 0:
+                cmd["params"]["reference_bbox_diagonal"] = selection_info.object_bbox_diagonal
+
+            if self.verbosity >= 2:
+                print(f"[MeshRepair INFO] Selection mode: {len(boundary_indices)} boundary vertices marked")
+                if selection_info.object_bbox_diagonal > 0:
+                    print(f"[MeshRepair INFO] Reference bbox diagonal: {selection_info.object_bbox_diagonal:.4f}")
 
         if self.batch_mode:
             # Batch mode: queue command

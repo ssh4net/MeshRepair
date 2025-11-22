@@ -3,6 +3,8 @@
 #include "types.h"
 #include "hole_detector.h"
 #include "config.h"
+#include <set>
+#include <cstdint>
 
 namespace MeshRepair {
 
@@ -26,6 +28,16 @@ struct FillingOptions {
 
     // Refinement
     bool refine = Config::DEFAULT_REFINE;  // Refine patch to match local density
+
+    // Selection boundary handling (for edit mode selection support)
+    // Holes where ALL boundary vertices are in this set are considered selection boundaries
+    // and will be skipped (not filled)
+    std::set<uint32_t> selection_boundary_vertices;
+
+    // Reference bounding box diagonal for diameter ratio calculation
+    // When > 0, use this instead of the current mesh's bbox diagonal
+    // This is useful when processing a selection subset where the mesh bbox is smaller than the full object
+    double reference_bbox_diagonal = 0.0;
 
     // Output verbosity
     bool verbose       = false;

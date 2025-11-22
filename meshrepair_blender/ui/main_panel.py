@@ -111,6 +111,9 @@ class MESHREPAIR_PT_Main(MESHREPAIR_PT_Base):
             # Scope override
             row = box_col.row(align=True)
             row.prop(props, "mesh_scope", expand=True)
+            if props.mesh_scope == 'SELECTION':
+                row = box_col.row(align=True)
+                row.prop(props, "selection_dilation", text="Expand")
 
         elif obj.mode == 'OBJECT':
             # Object mode - show mesh info

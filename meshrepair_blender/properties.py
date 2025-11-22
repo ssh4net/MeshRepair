@@ -46,6 +46,14 @@ class MeshRepairSceneProperties(PropertyGroup):
         default='SELECTION'
     )
 
+    selection_dilation: IntProperty(
+        name="Selection Expansion",
+        description="Number of times to expand edit-mode selection before export (-1 = auto)",
+        default=-1,
+        min=-1,
+        max=8
+    )
+
     # Preprocessing options
     enable_preprocessing: BoolProperty(
         name="Enable Preprocessing",

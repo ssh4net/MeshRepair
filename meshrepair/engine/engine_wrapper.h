@@ -71,6 +71,13 @@ namespace Engine {
         const Mesh& get_mesh() const;
         void set_mesh(Mesh&& mesh);
 
+        // Selection boundary info (for edit mode selection support)
+        void set_boundary_vertex_indices(const std::vector<uint32_t>& indices);
+        void set_reference_bbox_diagonal(double diagonal);
+        const std::vector<uint32_t>& get_boundary_vertex_indices() const { return boundary_vertex_indices_; }
+        double get_reference_bbox_diagonal() const { return reference_bbox_diagonal_; }
+        bool has_selection_boundary() const { return !boundary_vertex_indices_.empty(); }
+
         // Get mesh statistics (for responses)
         nlohmann::json get_mesh_info() const;
         nlohmann::json get_preprocessing_stats() const;
@@ -107,6 +114,10 @@ namespace Engine {
         // File logging
         std::ofstream log_file_;
         std::string log_file_path_;
+
+        // Selection boundary info (for edit mode selection support)
+        std::vector<uint32_t> boundary_vertex_indices_;  // Vertex indices on selection boundary
+        double reference_bbox_diagonal_;  // Full object bbox diagonal (0 = use mesh bbox)
 
         // Helper methods
         void log(const std::string& level, const std::string& message);

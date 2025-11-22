@@ -24,6 +24,7 @@ namespace Engine {
         , log_callback_(nullptr)
         , cancel_check_callback_(nullptr)
         , debug_mode_(false)
+        , reference_bbox_diagonal_(0.0)
     {
     }
 
@@ -270,21 +271,38 @@ namespace Engine {
         log("info", "Filling holes (mode: " + std::string(use_partitioned ? "partitioned" : "legacy") + ")");
         report_progress(0.0, "Filling holes");
 
+        // Create a copy of options and add selection boundary info
+        FillingOptions fill_options = options;
+
+        // Add selection boundary vertices if available
+        if (!boundary_vertex_indices_.empty()) {
+            fill_options.selection_boundary_vertices = std::set<uint32_t>(
+                boundary_vertex_indices_.begin(), boundary_vertex_indices_.end());
+            log("info", "  Selection mode: " + std::to_string(boundary_vertex_indices_.size()) +
+                        " boundary vertices will be used to detect selection boundaries");
+        }
+
+        // Add reference bbox diagonal if available
+        if (reference_bbox_diagonal_ > 0.0) {
+            fill_options.reference_bbox_diagonal = reference_bbox_diagonal_;
+            log("info", "  Using reference bbox diagonal: " + std::to_string(reference_bbox_diagonal_));
+        }
+
         // Record original stats
         hole_stats_.original_vertices = mesh_->number_of_vertices();
         hole_stats_.original_faces    = mesh_->number_of_faces();
 
         if (use_partitioned) {
             // Use partitioned parallel filling (default, faster)
-            ParallelHoleFillerPipeline processor(*mesh_, *thread_manager_, options);
-            hole_stats_ = processor.process_partitioned(options.verbose, debug_mode_);
+            ParallelHoleFillerPipeline processor(*mesh_, *thread_manager_, fill_options);
+            hole_stats_ = processor.process_partitioned(fill_options.verbose, debug_mode_);
         } else {
             // Use legacy pipeline (fallback)
-            PipelineProcessor processor(*mesh_, *thread_manager_, options);
+            PipelineProcessor processor(*mesh_, *thread_manager_, fill_options);
             if (thread_manager_->get_total_threads() > 1) {
-                hole_stats_ = processor.process_pipeline(options.verbose);
+                hole_stats_ = processor.process_pipeline(fill_options.verbose);
             } else {
-                hole_stats_ = processor.process_batch(options.verbose);
+                hole_stats_ = processor.process_batch(fill_options.verbose);
             }
         }
 
@@ -464,6 +482,22 @@ namespace Engine {
         log("info", "  Edges: " + std::to_string(mesh_->number_of_edges()));
     }
 
+    void EngineWrapper::set_boundary_vertex_indices(const std::vector<uint32_t>& indices)
+    {
+        boundary_vertex_indices_ = indices;
+        if (!indices.empty()) {
+            log("info", "Selection boundary vertices set: " + std::to_string(indices.size()) + " vertices marked");
+        }
+    }
+
+    void EngineWrapper::set_reference_bbox_diagonal(double diagonal)
+    {
+        reference_bbox_diagonal_ = diagonal;
+        if (diagonal > 0) {
+            log("info", "Reference bbox diagonal set: " + std::to_string(diagonal));
+        }
+    }
+
     void EngineWrapper::clear_mesh()
     {
         soup_             = std::nullopt;
@@ -471,6 +505,8 @@ namespace Engine {
         holes_detected_   = false;
         preprocess_stats_ = PreprocessingStats();
         hole_stats_       = MeshStatistics();
+        boundary_vertex_indices_.clear();
+        reference_bbox_diagonal_ = 0.0;
         if (state_ != EngineState::UNINITIALIZED) {
             state_ = EngineState::READY;
         }

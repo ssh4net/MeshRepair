@@ -164,9 +164,30 @@ HoleFiller::should_skip_hole(const HoleInfo& hole) const
         return true;
     }
 
-    // Check diameter relative to mesh
-    double mesh_diagonal = compute_mesh_bbox_diagonal();
-    if (mesh_diagonal > 0.0 && hole.estimated_diameter > mesh_diagonal * options_.max_hole_diameter_ratio) {
+    // Check if this hole is a selection boundary (should not be filled)
+    // A hole is considered a selection boundary if ALL its boundary vertices are in the selection boundary set
+    if (!options_.selection_boundary_vertices.empty()) {
+        bool all_boundary = true;
+        for (const auto& v : hole.boundary_vertices) {
+            uint32_t v_idx = static_cast<uint32_t>(v.idx());
+            if (options_.selection_boundary_vertices.find(v_idx) == options_.selection_boundary_vertices.end()) {
+                all_boundary = false;
+                break;
+            }
+        }
+        if (all_boundary) {
+            if (options_.verbose) {
+                std::cout << "    Skipping hole (selection boundary): all " << hole.boundary_size
+                          << " vertices are on selection boundary\n";
+            }
+            return true;
+        }
+    }
+
+    // Check diameter relative to mesh (or reference bbox if provided)
+    double ref_diagonal = options_.reference_bbox_diagonal > 0.0 ? options_.reference_bbox_diagonal
+                                                                 : compute_mesh_bbox_diagonal();
+    if (ref_diagonal > 0.0 && hole.estimated_diameter > ref_diagonal * options_.max_hole_diameter_ratio) {
         return true;
     }
 

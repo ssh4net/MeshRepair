@@ -1,5 +1,6 @@
 #include "parallel_hole_filler.h"
 #include <CGAL/IO/PLY.h>
+#include <CGAL/bounding_box.h>
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -41,19 +42,91 @@ ParallelHoleFillerPipeline::process_partitioned(bool verbose, bool debug)
     }
 
     HoleDetector detector(mesh_, verbose);
-    std::vector<HoleInfo> holes = detector.detect_all_holes();
+    std::vector<HoleInfo> all_holes = detector.detect_all_holes();
 
-    stats.num_holes_detected = holes.size();
+    stats.num_holes_detected = all_holes.size();
 
-    if (holes.empty()) {
+    if (all_holes.empty()) {
         std::cout << "No holes detected.\n";
         stats.final_vertices = stats.original_vertices;
         stats.final_faces    = stats.original_faces;
         return stats;
     }
 
+    // Pre-filter holes: remove selection boundaries and oversized holes
+    // This must be done before submesh extraction because vertex indices change in submeshes
+    std::vector<HoleInfo> holes;
+    holes.reserve(all_holes.size());
+    size_t selection_boundary_skipped = 0;
+    size_t oversized_skipped = 0;
+
+    // Calculate reference diagonal for size filtering
+    double ref_diagonal = filling_options_.reference_bbox_diagonal;
+    if (ref_diagonal <= 0.0) {
+        // Compute mesh bbox diagonal
+        std::vector<Point_3> all_points;
+        all_points.reserve(mesh_.number_of_vertices());
+        for (auto v : mesh_.vertices()) {
+            all_points.push_back(mesh_.point(v));
+        }
+        if (!all_points.empty()) {
+            auto bbox = CGAL::bounding_box(all_points.begin(), all_points.end());
+            ref_diagonal = std::sqrt(CGAL::to_double(CGAL::squared_distance(bbox.min(), bbox.max())));
+        }
+    }
+
+    for (const auto& hole : all_holes) {
+        // Check boundary vertex count
+        if (hole.boundary_size > filling_options_.max_hole_boundary_vertices) {
+            oversized_skipped++;
+            continue;
+        }
+
+        // Check diameter relative to reference bbox
+        if (ref_diagonal > 0.0 &&
+            hole.estimated_diameter > ref_diagonal * filling_options_.max_hole_diameter_ratio) {
+            oversized_skipped++;
+            continue;
+        }
+
+        // Check if this hole is a selection boundary
+        if (!filling_options_.selection_boundary_vertices.empty()) {
+            bool all_boundary = true;
+            for (const auto& v : hole.boundary_vertices) {
+                uint32_t v_idx = static_cast<uint32_t>(v.idx());
+                if (filling_options_.selection_boundary_vertices.find(v_idx) ==
+                    filling_options_.selection_boundary_vertices.end()) {
+                    all_boundary = false;
+                    break;
+                }
+            }
+            if (all_boundary) {
+                selection_boundary_skipped++;
+                if (verbose) {
+                    std::cout << "[Partitioned] Skipping selection boundary hole: "
+                              << hole.boundary_size << " vertices\n";
+                }
+                continue;
+            }
+        }
+
+        holes.push_back(hole);
+    }
+
+    stats.num_holes_skipped = selection_boundary_skipped + oversized_skipped;
+
+    if (holes.empty()) {
+        std::cout << "No fillable holes (skipped: " << selection_boundary_skipped << " selection boundaries, "
+                  << oversized_skipped << " oversized).\n";
+        stats.final_vertices = stats.original_vertices;
+        stats.final_faces    = stats.original_faces;
+        return stats;
+    }
+
     if (verbose) {
-        std::cout << "[Partitioned] Found " << holes.size() << " hole(s)\n";
+        std::cout << "[Partitioned] Found " << all_holes.size() << " hole(s), "
+                  << holes.size() << " fillable (skipped: " << selection_boundary_skipped << " selection boundaries, "
+                  << oversized_skipped << " oversized)\n";
     }
 
     // Phase 2: Partition holes by count (simple load balancing)

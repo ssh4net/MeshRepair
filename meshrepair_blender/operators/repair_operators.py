@@ -16,7 +16,7 @@ from bpy.types import Operator
 from bpy.props import BoolProperty, EnumProperty
 from ..preferences import get_prefs
 from ..engine.engine_session import EngineSession
-from ..utils.mesh_export import export_mesh_to_data
+from ..utils.mesh_export import export_mesh_to_data, MeshExportResult
 from ..utils.mesh_import import import_mesh_from_data
 
 
@@ -76,6 +76,45 @@ class MESHREPAIR_OT_Base(Operator):
         # Also log to console
         console_log(level, message)
 
+    def _selection_settings(self, context):
+        props = context.scene.meshrepair_props
+        obj = context.active_object
+
+        selection_only = (
+            obj and obj.mode == 'EDIT' and
+            getattr(props, "mesh_scope", 'SELECTION') == 'SELECTION'
+        )
+
+        dilation = 0
+        if selection_only:
+            dilation = getattr(props, "selection_dilation", -1)
+            if dilation is None or dilation < 0:
+                dilation = self._auto_selection_dilation(props)
+        return selection_only, dilation
+
+    def _auto_selection_dilation(self, props):
+        try:
+            continuity = int(getattr(props, "filling_continuity", '1'))
+        except Exception:
+            continuity = 1
+        return max(1, min(3, continuity + 1))
+
+    def _export_active_mesh(self, context):
+        obj = context.active_object
+        selection_only, dilation = self._selection_settings(context)
+        export_result = export_mesh_to_data(
+            obj,
+            selection_only=selection_only,
+            dilation_iters=dilation
+        )
+
+        if selection_only and not export_result.selection_only:
+            self.console_report('WARNING', "Selection was empty; processed whole mesh instead.")
+        elif export_result.selection_only and dilation > 0:
+            self.console_report('INFO', f"Selection expanded by {dilation} iteration(s).")
+
+        return export_result
+
 
 class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
     """Preprocess mesh (remove duplicates, non-manifold vertices, etc.)"""
@@ -104,7 +143,8 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
         try:
             # Export mesh data (no temp files)
             self.console_report('INFO', "Exporting mesh data...")
-            mesh_data = export_mesh_to_data(obj, selection_only=(obj.mode == 'EDIT'))
+            export_result = self._export_active_mesh(context)
+            mesh_data = export_result.mesh_data
             console_log('INFO', f"Exported {len(mesh_data['vertices'])} vertices, {len(mesh_data['faces'])} faces")
 
             # Start engine session
@@ -163,7 +203,12 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
                         response = resolved
 
                 self.console_report('INFO', "Importing result...")
-                import_mesh_from_data(result_mesh_data, obj, replace=True)
+                import_mesh_from_data(
+                    result_mesh_data,
+                    obj,
+                    replace=not export_result.selection_only,
+                    selection_info=export_result if export_result.selection_only else None
+                )
 
             # Update props
             elapsed_time = (time.time() - start_time) * 1000
@@ -216,7 +261,8 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
         try:
             # Export mesh data (no temp files)
             self.report({'INFO'}, "Exporting mesh data...")
-            mesh_data = export_mesh_to_data(obj, selection_only=(obj.mode == 'EDIT'))
+            export_result = self._export_active_mesh(context)
+            mesh_data = export_result.mesh_data
 
             # Start engine session
             session = EngineSession(
@@ -228,9 +274,9 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
                 temp_dir=prefs.temp_dir
             )
 
-            # Load mesh via pipe
+            # Load mesh via pipe (pass selection_info for boundary vertex handling)
             self.report({'INFO'}, "Loading mesh into engine...")
-            session.load_mesh(mesh_data)
+            session.load_mesh(mesh_data, selection_info=export_result if export_result.selection_only else None)
 
             # Build detection options (send both legacy and current keys)
             max_boundary = props.filling_max_boundary
@@ -301,7 +347,8 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
         try:
             # Export mesh data (no temp files)
             self.report({'INFO'}, "Exporting mesh data...")
-            mesh_data = export_mesh_to_data(obj, selection_only=(obj.mode == 'EDIT'))
+            export_result = self._export_active_mesh(context)
+            mesh_data = export_result.mesh_data
 
             # Start engine session
             session = EngineSession(
@@ -313,9 +360,9 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
                 temp_dir=prefs.temp_dir
             )
 
-            # Load mesh via pipe
+            # Load mesh via pipe (pass selection_info for boundary vertex handling)
             self.report({'INFO'}, "Loading mesh into engine...")
-            session.load_mesh(mesh_data)
+            session.load_mesh(mesh_data, selection_info=export_result if export_result.selection_only else None)
 
             # Build filling options
             max_boundary = props.filling_max_boundary
@@ -360,7 +407,12 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
             props.last_faces_added = hole_stats.get('total_faces_added', 0)
 
             self.console_report('INFO', "Importing result...")
-            import_mesh_from_data(result_mesh_data, obj, replace=True)
+            import_mesh_from_data(
+                result_mesh_data,
+                obj,
+                replace=not export_result.selection_only,
+                selection_info=export_result if export_result.selection_only else None
+            )
 
             # Update props
             elapsed_time = (time.time() - start_time) * 1000
@@ -431,7 +483,8 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
         try:
             # Export mesh data (no temp files)
             self.report({'INFO'}, "Exporting mesh data...")
-            mesh_data = export_mesh_to_data(obj, selection_only=(obj.mode == 'EDIT'))
+            export_result = self._export_active_mesh(context)
+            mesh_data = export_result.mesh_data
 
             # Start engine session
             session = EngineSession(
@@ -443,9 +496,9 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
                 temp_dir=prefs.temp_dir
             )
 
-            # Load mesh via pipe
+            # Load mesh via pipe (pass selection_info for boundary vertex handling)
             self.report({'INFO'}, "Loading mesh into engine...")
-            session.load_mesh(mesh_data)
+            session.load_mesh(mesh_data, selection_info=export_result if export_result.selection_only else None)
 
             # Preprocessing (if enabled)
             preprocess_response = None
@@ -501,7 +554,12 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
                         preprocess_response = resolved_pre
 
             self.console_report('INFO', "Importing result...")
-            import_mesh_from_data(result_mesh_data, obj, replace=True)
+            import_mesh_from_data(
+                result_mesh_data,
+                obj,
+                replace=not export_result.selection_only,
+                selection_info=export_result if export_result.selection_only else None
+            )
 
             if props.enable_preprocessing and preprocess_response:
                 preprocess_stats = preprocess_response.get('stats', {})

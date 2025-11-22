@@ -1,5 +1,7 @@
 #include "command_handler.h"
 #include "mesh_binary.h"
+#include "../include/debug_path.h"
+#include <CGAL/IO/PLY.h>
 #include <stdexcept>
 #include <sstream>
 #include <chrono>
@@ -7,6 +9,27 @@
 
 namespace MeshRepair {
 namespace Engine {
+
+    namespace {
+        void dump_received_mesh_to_ply(const Mesh& mesh, bool enable_logging)
+        {
+            try {
+                std::string filename = MeshRepair::DebugPath::resolve("debug_00_received_from_blender.ply");
+                if (filename.empty()) {
+                    return;
+                }
+
+                bool saved = CGAL::IO::write_PLY(filename, mesh, CGAL::parameters::use_binary_mode(true));
+                if (saved && enable_logging) {
+                    std::cerr << "[Engine] Saved received mesh dump: " << filename << "\n";
+                }
+            } catch (const std::exception& ex) {
+                if (enable_logging) {
+                    std::cerr << "[Engine] Failed to dump received mesh: " << ex.what() << "\n";
+                }
+            }
+        }
+    }  // namespace
 
     CommandHandler::CommandHandler(std::ostream& output_stream, bool verbose, bool show_stats, bool socket_mode)
         : engine_()
@@ -277,8 +300,24 @@ namespace Engine {
                     std::cerr << "[Engine]   Deserialization time: " << deserialize_ms << " ms\n";
                 }
 
+                dump_received_mesh_to_ply(mesh, socket_mode_ && verbose_);
+
                 // Load mesh into engine
                 engine_.set_mesh(std::move(mesh));
+
+                // Set selection boundary info if provided (for edit mode selection support)
+                if (params.contains("boundary_vertex_indices")) {
+                    std::vector<uint32_t> boundary_indices;
+                    for (const auto& idx : params["boundary_vertex_indices"]) {
+                        boundary_indices.push_back(idx.get<uint32_t>());
+                    }
+                    engine_.set_boundary_vertex_indices(boundary_indices);
+                }
+
+                if (params.contains("reference_bbox_diagonal")) {
+                    double ref_diagonal = params["reference_bbox_diagonal"].get<double>();
+                    engine_.set_reference_bbox_diagonal(ref_diagonal);
+                }
 
                 auto end_time = std::chrono::high_resolution_clock::now();
                 auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();

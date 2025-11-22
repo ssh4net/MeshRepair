@@ -141,6 +141,7 @@ class MESHREPAIR_OT_reset_settings(Operator):
         # Reset operation settings
         props.operation_mode = 'FULL'
         props.mesh_scope = 'SELECTION'
+        props.selection_dilation = -1
 
         # Reset preprocessing
         props.enable_preprocessing = True
