@@ -1,0 +1,43 @@
+# MeshRepair Documentation - Jekyll Configuration for GitHub Pages
+
+# Site settings
+title: MeshRepair Documentation
+description: Professional mesh hole filling for 3D artists, game developers, and scanning professionals
+baseurl: "/meshrepair" # Change to your repo name
+url: "https://yourusername.github.io" # Change to your GitHub Pages URL
+
+# Theme
+theme: jekyll-theme-midnight
+
+# Markdown settings
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+
+# Defaults
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "default"
+
+# Navigation
+nav:
+  - title: Home
+    url: /
+  - title: CLI Guide
+    url: /cli-guide
+  - title: Blender Addon
+    url: /blender-addon-guide
+
+# Exclude files
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+  - images/IMAGE_PLACEHOLDERS.md
