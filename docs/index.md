@@ -14,9 +14,6 @@ MeshRepair is an open-source tool for detecting and filling holes in triangulate
 
 ## Project Background
 
-![RealityScan Workflow Problem](images/realityscan-problem-placeholder.png)
-*<!-- PLACEHOLDER: Diagram showing RealityScan mesh with huge boundary polygons, then after removal showing holes -->*
-
 This tool was developed to address a common issue in photogrammetry workflows:
 
 ### The Problem with Photogrammetry Output
@@ -29,8 +26,7 @@ Software such as **Epic's RealityScan** (formerly RealityCapture) and similar ph
 | **Low overlap regions** | Oversized faces where few source images overlap |
 | **Weak depth reconstruction** | Large polygons masking areas with poor 3D data |
 
-![Problematic Polygons Example](images/huge-polygons-placeholder.png)
-*<!-- PLACEHOLDER: Close-up of a RealityScan mesh showing giant boundary triangles -->*
+![Problematic Polygons Example](https://ssh4net.github.io/MeshRepair/images/huge-polygons-holes.png)
 
 ### Impact on Downstream Processing
 
