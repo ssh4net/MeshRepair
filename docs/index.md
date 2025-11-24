@@ -117,9 +117,6 @@ Provides direct access to repair operations from Blender's sidebar panel.
 
 MeshRepair processes meshes through four stages:
 
-![Process Diagram](images/process-diagram-placeholder.png)
-*<!-- PLACEHOLDER: Flowchart showing the 4 stages -->*
-
 ### 1. Preprocessing
 Cleans mesh topology by removing duplicate vertices, non-manifold elements, isolated vertices, and small disconnected components.
 
@@ -144,8 +141,7 @@ The hole filling algorithm supports three continuity levels:
 | **C¹** | Tangent continuity | Medium | General use |
 | **C²** | Curvature continuity | High | High-quality output |
 
-![Quality Comparison](images/quality-levels-placeholder.png)
-*<!-- PLACEHOLDER: Side-by-side comparison of the three quality levels -->*
+![Quality Comparison](https://ssh4net.github.io/MeshRepair/images/quality-levels.gif)
 
 ---
 
