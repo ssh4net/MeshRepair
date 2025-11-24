@@ -4,8 +4,7 @@
 
 MeshRepair for Blender integrates the MeshRepair engine directly into Blender's interface, providing access to hole detection and filling operations from the sidebar panel. This guide covers installation, configuration, and usage.
 
-![Blender Addon Banner](images/blender-banner-placeholder.png)
-*<!-- PLACEHOLDER: Hero image showing the addon panel in Blender with a repaired mesh -->*
+![Blender Addon Banner](https://ssh4net.github.io/MeshRepair/images/blender-preview.png)
 
 ---
 
@@ -36,9 +35,6 @@ MeshRepair for Blender integrates the MeshRepair engine directly into Blender's 
 | **Undo Support** | Full integration with Blender's undo system |
 | **Multi-threaded** | Parallel processing via external engine |
 
-![Features Overview](images/features-overview-placeholder.png)
-*<!-- PLACEHOLDER: Annotated screenshot showing key features of the addon -->*
-
 ---
 
 ## Installation
@@ -47,7 +43,7 @@ MeshRepair for Blender integrates the MeshRepair engine directly into Blender's 
 
 The addon requires the MeshRepair engine executable:
 
-1. Download from [GitHub Releases](https://github.com/your-repo/meshrepair/releases)
+1. Download from [Patreon](https://www.patreon.com/c/MadProcessor/posts?filters%5Btag%5D=meshrepair) or build from source
 2. Extract to a permanent location:
    - **Windows**: `C:\Program Files\MeshRepair\`
    - **Linux**: `/usr/local/bin/` or `~/meshrepair/`
@@ -60,17 +56,13 @@ The addon requires the MeshRepair engine executable:
 3. Click **Install...** and select the ZIP file
 4. Enable "Mesh: MeshRepair"
 
-![Addon Installation](images/addon-install-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of Blender preferences with addon installation highlighted -->*
-
 ### Step 3: Configure Engine Path
 
 1. In addon preferences, click **Detect Engine** for automatic detection
 2. If detection fails, manually browse to the `meshrepair` executable
 3. Click **Test Engine** to verify connectivity
 
-![Engine Configuration](images/engine-config-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of addon preferences showing engine path configuration -->*
+![Addon Installation](https://ssh4net.github.io/MeshRepair/images/blender_preferences.png)
 
 ### Verification
 
