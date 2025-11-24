@@ -80,13 +80,10 @@ The Engine Status panel should display:
 2. Press **N** to open the sidebar
 3. Select the **Mesh Repair** tab
 
-![Panel Location](images/panel-location-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot showing how to find the Mesh Repair panel in the sidebar -->*
-
 ### Panel Structure
 
-![Interface Overview](images/interface-overview-placeholder.png)
-*<!-- PLACEHOLDER: Annotated screenshot of the full addon interface -->*
+![Interface Overview](https://ssh4net.github.io/MeshRepair/images/blender_addon_panel.png)
+
 
 | Section | Function |
 |---------|----------|
@@ -107,9 +104,6 @@ The panel displays context information based on current mode:
 | **Edit Mode** | Selected faces / total faces, scope selector |
 | **No Selection** | Warning message |
 
-![Mode Indicator](images/mode-indicator-placeholder.png)
-*<!-- PLACEHOLDER: Three screenshots showing different mode states -->*
-
 ---
 
 ## Preset Operations
@@ -117,9 +111,6 @@ The panel displays context information based on current mode:
 For standard use cases, preset buttons provide configured parameter combinations:
 
 ### C⁰ (Fast)
-
-![Fast Repair Button](images/fast-repair-button-placeholder.png)
-*<!-- PLACEHOLDER: Close-up of Fast Repair button -->*
 
 | Parameter | Value |
 |-----------|-------|
@@ -131,9 +122,6 @@ Suitable for: Preview, large meshes, non-critical repairs
 
 ### C¹ (Standard)
 
-![Standard Repair Button](images/quality-repair-button-placeholder.png)
-*<!-- PLACEHOLDER: Close-up of Quality Repair button -->*
-
 | Parameter | Value |
 |-----------|-------|
 | Continuity | C¹ (tangent) |
@@ -144,9 +132,6 @@ Suitable for: General use, balanced quality and performance
 
 ### C² (High Quality)
 
-![High Quality Repair Button](images/highquality-repair-button-placeholder.png)
-*<!-- PLACEHOLDER: Close-up of High Quality Repair button -->*
-
 | Parameter | Value |
 |-----------|-------|
 | Continuity | C² (curvature) |
@@ -155,28 +140,17 @@ Suitable for: General use, balanced quality and performance
 
 Suitable for: Final output, additive manufacturing, high-fidelity requirements
 
-### Continuity Comparison
-
-![Continuity Comparison](images/blender-quality-comparison-placeholder.png)
-*<!-- PLACEHOLDER: Side-by-side render of same hole filled with C⁰/C¹/C² -->*
-
 ---
 
 ## Manual Operations
 
 For fine control, switch to **Custom** mode:
 
-![Custom Mode](images/custom-mode-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of Custom mode interface -->*
-
 ### Operation Sequence
 
 #### 1. Preprocess Mesh
 
 Executes topology cleanup operations.
-
-![Preprocess Step](images/preprocess-step-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot showing preprocessing button and results -->*
 
 Operations performed:
 - Duplicate vertex merging
@@ -188,9 +162,6 @@ Operations performed:
 
 Analyzes mesh and reports hole count.
 
-![Detect Step](images/detect-step-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot showing detect button and hole count results -->*
-
 Output:
 - Total holes detected
 - Hole size distribution
@@ -198,9 +169,6 @@ Output:
 #### 3. Fill Holes
 
 Fills detected holes using configured parameters.
-
-![Fill Step](images/fill-step-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot showing fill button and results -->*
 
 Output:
 - Holes filled successfully
@@ -227,9 +195,6 @@ The addon supports processing selected regions in Edit Mode.
 
 In Edit Mode, the **Scope** option controls processing extent:
 
-![Scope Options](images/scope-options-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot showing Selection vs Whole Mesh radio buttons -->*
-
 | Option | Behavior |
 |--------|----------|
 | **Selection** | Process selected faces and detected holes within |
@@ -243,15 +208,9 @@ In Edit Mode, the **Scope** option controls processing extent:
 4. Include adequate surrounding geometry for blending
 5. Execute repair operation
 
-![Edit Mode Selection](images/editmode-selection-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot showing face selection around a hole -->*
-
 ### Selection Expansion
 
 The addon automatically expands selection to include neighboring geometry for smooth blending. Control this behavior with the expansion parameter:
-
-![Selection Expansion](images/selection-expansion-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot showing the expansion slider -->*
 
 | Value | Behavior |
 |-------|----------|
@@ -267,9 +226,6 @@ The addon distinguishes between:
 - **Selection boundaries**: Edges of the selected region (not holes)
 - **Actual holes**: Gaps in the mesh surface
 
-![Selection Boundary](images/selection-boundary-placeholder.png)
-*<!-- PLACEHOLDER: Diagram showing selection boundary vs actual holes -->*
-
 Selection boundaries are automatically excluded from hole filling.
 
 ---
@@ -277,9 +233,6 @@ Selection boundaries are automatically excluded from hole filling.
 ## Preprocessing Options
 
 Expand the Preprocessing panel to access cleanup settings:
-
-![Preprocessing Panel](images/preprocessing-panel-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of expanded preprocessing options -->*
 
 ### Presets
 
@@ -311,9 +264,6 @@ Expand the Preprocessing panel to access cleanup settings:
 
 Expand the Hole Filling panel to access algorithm parameters:
 
-![Filling Panel](images/filling-panel-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of expanded hole filling options -->*
-
 ### Size Limits
 
 | Parameter | Default | Description |
@@ -322,9 +272,6 @@ Expand the Hole Filling panel to access algorithm parameters:
 | **Max Diameter** | 0.1 | Maximum diameter as ratio of mesh bbox |
 
 Holes exceeding these limits are skipped.
-
-![Size Limits Visual](images/size-limits-visual-placeholder.png)
-*<!-- PLACEHOLDER: Visual showing small holes filled, large hole skipped -->*
 
 ### Quality Parameters
 
@@ -335,8 +282,6 @@ Holes exceeding these limits are skipped.
 
 ### Continuity Levels
 
-![Continuity Comparison](images/continuity-comparison-placeholder.png)
-*<!-- PLACEHOLDER: Visual showing C⁰/C¹/C² differences on same hole -->*
 
 | Level | Description | Computation |
 |-------|-------------|-------------|
@@ -360,9 +305,6 @@ Default values are suitable for most cases.
 ## Results and Statistics
 
 After operations, the **Results** panel displays statistics:
-
-![Results Panel](images/results-panel-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of results panel with all statistics -->*
 
 ### Summary
 
@@ -397,9 +339,6 @@ After operations, the **Results** panel displays statistics:
 ## Configuration Guidelines
 
 ### 3D Scans
-
-![3D Scan Tips](images/scan-tips-placeholder.png)
-*<!-- PLACEHOLDER: Annotated 3D scan showing problem areas -->*
 
 Recommended settings:
 1. Enable preprocessing with all options
@@ -436,9 +375,6 @@ Recommended settings:
 ## Troubleshooting
 
 ### Engine Not Found
-
-![Engine Not Found](images/engine-notfound-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of error state -->*
 
 Resolution:
 1. Open addon preferences
@@ -479,9 +415,6 @@ Resolution:
 
 ### Unexpected Results
 
-![Unexpected Results](images/unexpected-results-placeholder.png)
-*<!-- PLACEHOLDER: Example of a problem result -->*
-
 Resolution:
 1. Undo (Ctrl+Z) and adjust parameters
 2. Use Edit Mode for section-by-section repair
@@ -504,9 +437,6 @@ For issue reporting, enable verbose output:
 ## Addon Preferences Reference
 
 Access via **Edit → Preferences → Add-ons → Mesh: MeshRepair**
-
-![Preferences Panel](images/preferences-panel-placeholder.png)
-*<!-- PLACEHOLDER: Screenshot of full preferences panel -->*
 
 ### Engine Settings
 
