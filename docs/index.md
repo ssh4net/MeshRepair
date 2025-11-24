@@ -41,7 +41,7 @@ These oversized polygons create problems for subsequent operations:
 
 The recommended approach is to remove problematic oversized polygons (creating holes) and then fill those holes with properly-sized geometry:
 
-![Workflow Comparison](images/workflow-comparison-placeholder.png)
+![Workflow Comparison](https://ssh4net.github.io/MeshRepair/images/workflow.gif)
 *<!-- PLACEHOLDER: 3-step comparison: 1) Original with huge polys 2) After removal (holes) 3) After MeshRepair (clean) -->*
 
 MeshRepair generates fill geometry with:
