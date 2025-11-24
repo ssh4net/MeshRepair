@@ -2,7 +2,7 @@
 
 > Automatic mesh hole detection and filling for 3D scanning, game development, and additive manufacturing workflows
 
-![MeshRepair Hero](images/MeshRepair_banner.gif)
+![MeshRepair Hero](https://ssh4net.github.io/MeshRepair/images/MeshRepair_banner.gif)
 
 ---
 
