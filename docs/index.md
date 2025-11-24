@@ -58,23 +58,13 @@ Photogrammetry outputs frequently contain millions of polygons. MeshRepair is de
 - Optimized OBJ/PLY file loading
 - Blender Edit Mode support for processing mesh sections
 
-| Mesh Size | Typical Processing Time |
-|-----------|------------------------|
-| 100K triangles | < 1 second |
-| 1M triangles | 2-5 seconds |
-| 10M triangles | 15-30 seconds |
-| 50M+ triangles | Minutes (section-based processing recommended) |
-
 ### Recommended Workflow
 
 ```
-Photogrammetry Export (RealityScan, Metashape, etc.)
-        ↓
-Remove oversized boundary polygons (Blender, ZBrush, etc.)
-        ↓
-MeshRepair (fill holes with uniform geometry)
-        ↓
-Continue with sculpting, retopology, or mesh wrapping
+Photogrammetry (RealityScan, Metashape, etc.) ->
+-> Remove oversized boundary polygons (RealityScan, Metashape, Blender, ZBrush, etc.) ->
+-> MeshRepair (fill holes with uniform geometry) ->
+-> Continue with sculpting, retopology, or mesh wrapping
 ```
 
 ---
