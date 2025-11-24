@@ -4,8 +4,7 @@
 
 MeshRepair CLI provides batch processing capabilities for detecting and filling holes in triangulated 3D meshes. This guide covers installation, usage, and configuration options.
 
-![MeshRepair CLI Banner](images/cli-banner-placeholder.png)
-*<!-- PLACEHOLDER: Hero image showing before/after of a repaired 3D scan -->*
+![MeshRepair CLI Banner](https://ssh4net.github.io/MeshRepair/images/cli-banner.gif)
 
 ---
 
@@ -36,12 +35,10 @@ meshrepair input.obj output.obj
 This command will:
 1. Load the input mesh
 2. Preprocess to fix topology issues
-3. Detect all holes
-4. Fill holes with C¹ continuity
-5. Save the result
-
-![Quick Start Example](images/quickstart-example-placeholder.png)
-*<!-- PLACEHOLDER: Terminal screenshot showing basic command and output -->*
+3. Remove small disconnected components
+4. Detect all holes
+5. Fill holes with C¹ continuity
+6. Save the result
 
 ---
 
@@ -50,9 +47,6 @@ This command will:
 ### Definition
 
 A mesh hole is a boundary loop where the surface is discontinuous. Holes are defined by a sequence of border edges that form a closed loop without adjacent faces on one side.
-
-![Mesh Hole Diagram](images/hole-anatomy-placeholder.png)
-*<!-- PLACEHOLDER: Diagram showing a mesh hole with labeled boundary edges and missing surface -->*
 
 ### Common Sources
 
@@ -63,9 +57,6 @@ A mesh hole is a boundary loop where the surface is discontinuous. Holes are def
 | **Incomplete Modeling** | Intentionally or accidentally omitted faces |
 | **File Conversion** | Data loss during format translation |
 | **Data Corruption** | Random missing faces from file damage |
-
-![Hole Sources Examples](images/hole-sources-placeholder.png)
-*<!-- PLACEHOLDER: Grid of 5 images showing each hole type -->*
 
 ### Applications Requiring Watertight Meshes
 
@@ -84,9 +75,6 @@ MeshRepair processes meshes through four sequential stages:
 
 Topology cleanup operations:
 
-![Preprocessing Stage](images/preprocessing-stage-placeholder.png)
-*<!-- PLACEHOLDER: Diagram showing mesh before/after preprocessing -->*
-
 | Operation | Description |
 |-----------|-------------|
 | **Duplicate Merging** | Combines vertices at identical positions |
@@ -99,9 +87,6 @@ Topology cleanup operations:
 
 Identifies all boundary loops by traversing border halfedges:
 
-![Hole Detection](images/hole-detection-placeholder.png)
-*<!-- PLACEHOLDER: Mesh with detected holes highlighted in different colors -->*
-
 For each detected hole:
 - **Boundary vertex count**: Number of vertices forming the hole perimeter
 - **Estimated diameter**: Bounding box diagonal of boundary vertices
@@ -110,9 +95,6 @@ For each detected hole:
 ### Stage 3: Hole Filling
 
 Each hole is triangulated using the Liepa algorithm:
-
-![Hole Filling Process](images/filling-process-placeholder.png)
-*<!-- PLACEHOLDER: 4-step diagram showing: 1) Hole boundary 2) Initial triangulation 3) Refinement 4) Fairing/smoothing -->*
 
 1. **Triangulation**: Constrained Delaunay triangulation (2D projection or 3D)
 2. **Refinement**: Optional vertex insertion to match local mesh density
@@ -156,9 +138,6 @@ sudo mv meshrepair /usr/local/bin/
 ```bash
 meshrepair --help
 ```
-
-![Installation Verification](images/install-verify-placeholder.png)
-*<!-- PLACEHOLDER: Terminal showing successful --help output -->*
 
 ---
 
@@ -223,9 +202,6 @@ meshrepair model.obj fixed.obj --continuity 0
 - Visible seam at patch boundary
 - Fastest computation
 
-![C⁰ Mode Result](images/fast-mode-placeholder.png)
-*<!-- PLACEHOLDER: Before/after showing C⁰ repair -->*
-
 ### C¹ Continuity (Tangent) - Default
 
 ```bash
@@ -236,9 +212,6 @@ meshrepair model.obj fixed.obj --continuity 1
 - Smooth visual transition
 - Balanced computation time
 
-![C¹ Mode Result](images/quality-mode-placeholder.png)
-*<!-- PLACEHOLDER: Before/after showing C¹ repair -->*
-
 ### C² Continuity (Curvature)
 
 ```bash
@@ -248,14 +221,6 @@ meshrepair model.obj fixed.obj --continuity 2
 - Filled surface matches boundary curvature
 - Minimal visible seam
 - Highest computation cost
-
-![C² Mode Result](images/highquality-mode-placeholder.png)
-*<!-- PLACEHOLDER: Before/after showing C² repair -->*
-
-### Comparison
-
-![Continuity Comparison](images/quality-comparison-placeholder.png)
-*<!-- PLACEHOLDER: Side-by-side comparison of C⁰, C¹, C² on same hole -->*
 
 ---
 
@@ -272,9 +237,6 @@ meshrepair model.obj fixed.obj --max-boundary 500
 # Maximum diameter as ratio of mesh bounding box
 meshrepair model.obj fixed.obj --max-diameter 0.05
 ```
-
-![Size Limits Diagram](images/size-limits-placeholder.png)
-*<!-- PLACEHOLDER: Mesh showing which holes would be filled/skipped based on size -->*
 
 ### Preprocessing Control
 
@@ -309,9 +271,6 @@ meshrepair large_model.obj fixed.obj --threads 4
 meshrepair large_model.obj fixed.obj --threads 0
 ```
 
-![Threading Performance](images/threading-chart-placeholder.png)
-*<!-- PLACEHOLDER: Chart showing speedup with different thread counts -->*
-
 ### Debug Output
 
 ```bash
@@ -331,9 +290,6 @@ Generated files:
 3D scans present specific challenges for hole filling.
 
 ### Common Issues
-
-![3D Scan Issues](images/scan-issues-placeholder.png)
-*<!-- PLACEHOLDER: Annotated 3D scan showing common problem areas -->*
 
 1. **Occlusion gaps**: Areas not visible to scanner
 2. **Edge artifacts**: Incomplete boundaries at scan limits
@@ -371,9 +327,6 @@ meshrepair artifact.ply restored.ply \
     --max-diameter 0.15 \
     -v 2
 ```
-
-![Scan Repair Example](images/scan-repair-placeholder.png)
-*<!-- PLACEHOLDER: Before/after of a real 3D scan repair -->*
 
 ---
 
@@ -506,45 +459,6 @@ meshrepair --engine [engine-options]
 |--------|---------|-------------|
 | `--ascii-ply` | off | Write PLY in ASCII format |
 
----
-
-## Examples
-
-### Basic Repair
-
-![Example 1](images/example-simple-placeholder.png)
-*<!-- PLACEHOLDER: Before/after of a simple object with small holes -->*
-
-```bash
-meshrepair vase.obj vase_fixed.obj
-```
-
-### 3D Scan Restoration
-
-![Example 2](images/example-scan-placeholder.png)
-*<!-- PLACEHOLDER: Before/after of a human bust scan -->*
-
-```bash
-meshrepair bust_scan.ply bust_restored.ply --continuity 2 -v 2
-```
-
-### Game Asset Preparation
-
-![Example 3](images/example-game-placeholder.png)
-*<!-- PLACEHOLDER: Before/after of a game character model -->*
-
-```bash
-meshrepair character.obj character_clean.obj --max-diameter 0.05
-```
-
-### Additive Manufacturing Preparation
-
-![Example 4](images/example-print-placeholder.png)
-*<!-- PLACEHOLDER: Before/after showing watertight mesh for printing -->*
-
-```bash
-meshrepair figurine.obj figurine_printready.obj --continuity 2 --validate
-```
 
 ---
 
