@@ -61,9 +61,9 @@ Photogrammetry outputs frequently contain millions of polygons. MeshRepair is de
 ### Recommended Workflow
 
 ```
-Photogrammetry (RealityScan, Metashape, 3DF Zephir, etc.) ->
--> Remove oversized boundary polygons (RealityScan, Metashape, Blender, etc.) ->
--> MeshRepair CLI or Addon (fill holes with uniform geometry) ->
+Photogrammetry (RealityScan, Metashape, 3DF Zephir, ...)
+-> Remove oversized boundary polygons (RealityScan, Metashape, Blender, ...)
+-> MeshRepair CLI or Addon (fill holes with uniform geometry)
 -> Continue with sculpting, retopology, or mesh wrapping
 ```
 
@@ -173,17 +173,18 @@ The hole filling algorithm supports three continuity levels:
 
 ## Support
 
-- **Issue Tracker**: [GitHub Issues](https://github.com/your-repo/meshrepair/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/meshrepair/discussions)
+- **Issue Tracker**: [GitHub Issues](https://github.com/ssh4net/MeshRepair/issues)
 
 ---
 
 ## License
 
-MeshRepair is released under the **GPL v2.0** license.
+MeshRepair is released under the **LGPL-2.1 license** license.
+MeshRepair Blender addon is released under the **GPL-2.0 license** license.
 
 Dependencies:
 - **CGAL** - Computational geometry algorithms
+- **Eigen** - Linear and sparse matrix computations
 - **nlohmann/json** - JSON parsing
 - **RapidOBJ** - OBJ file loading
 
