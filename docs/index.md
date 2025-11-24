@@ -61,9 +61,9 @@ Photogrammetry outputs frequently contain millions of polygons. MeshRepair is de
 ### Recommended Workflow
 
 ```
-Photogrammetry (RealityScan, Metashape, etc.) ->
--> Remove oversized boundary polygons (RealityScan, Metashape, Blender, ZBrush, etc.) ->
--> MeshRepair (fill holes with uniform geometry) ->
+Photogrammetry (RealityScan, Metashape, 3DF Zephir, etc.) ->
+-> Remove oversized boundary polygons (RealityScan, Metashape, Blender, etc.) ->
+-> MeshRepair CLI or Addon (fill holes with uniform geometry) ->
 -> Continue with sculpting, retopology, or mesh wrapping
 ```
 
@@ -89,7 +89,7 @@ Photogrammetry (RealityScan, Metashape, etc.) ->
 
 For batch processing, automation, and integration with other tools.
 
-![CLI Preview](images/cli-preview-placeholder.png)
+![CLI Preview](https://ssh4net.github.io/MeshRepair/images/cli-preview.png)
 *<!-- PLACEHOLDER: Terminal screenshot -->*
 
 ```bash
@@ -104,7 +104,7 @@ meshrepair input.obj output.obj
 
 For interactive use within Blender's modeling environment.
 
-![Blender Preview](images/blender-preview-placeholder.png)
+![Blender Preview](https://ssh4net.github.io/MeshRepair/images/blender-preview.png)
 *<!-- PLACEHOLDER: Blender UI screenshot -->*
 
 Provides direct access to repair operations from Blender's sidebar panel.
