@@ -134,38 +134,6 @@ Exports the repaired mesh in the specified format.
 
 ---
 
-## Applications
-
-### 3D Scanning
-
-![Scan Use Case](images/usecase-scan-placeholder.png)
-*<!-- PLACEHOLDER: Before/after of 3D scan -->*
-
-Fills gaps resulting from scanner occlusion. Applicable to photogrammetry, structured light scanning, and LiDAR data.
-
-### Game Development
-
-![Game Use Case](images/usecase-game-placeholder.png)
-*<!-- PLACEHOLDER: Before/after of game asset -->*
-
-Prepares assets for game engines that require closed mesh geometry. Repairs imported models with topology defects.
-
-### Additive Manufacturing
-
-![Print Use Case](images/usecase-print-placeholder.png)
-*<!-- PLACEHOLDER: Before/after with slicer preview -->*
-
-Creates watertight meshes required by slicing software for 3D printing.
-
-### Digital Preservation
-
-![Heritage Use Case](images/usecase-heritage-placeholder.png)
-*<!-- PLACEHOLDER: Before/after of heritage artifact scan -->*
-
-Repairs scanned cultural heritage artifacts and archaeological objects.
-
----
-
 ## Surface Continuity Levels
 
 The hole filling algorithm supports three continuity levels:
