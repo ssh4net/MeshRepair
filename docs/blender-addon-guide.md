@@ -215,6 +215,11 @@ In Edit Mode, the **Scope** option controls processing extent:
 4. Include adequate surrounding geometry for blending
 5. Execute repair operation
 
+**Warning**:
+- Selection mode quite brithle; ensure proper selection to avoid unintended results. 
+- Make sure to use polygon selection, not vertex or edge selection.
+- Sometime expanding selection Ctrl+ couple times and shrinking Ctrl- it back helps to get a clean selection.
+- Delete new geometry if results are unsatisfactory and run in Whole Mesh mode or in Object Mode.
 
 ### Selection Expansion
 
