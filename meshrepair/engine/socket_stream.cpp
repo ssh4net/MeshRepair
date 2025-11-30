@@ -21,10 +21,7 @@ namespace Engine {
         setp(out_base, out_base + buffer_size);
     }
 
-    SocketStreambuf::~SocketStreambuf()
-    {
-        sync();
-    }
+    SocketStreambuf::~SocketStreambuf() { sync(); }
 
     std::streambuf::int_type SocketStreambuf::underflow()
     {
@@ -90,10 +87,7 @@ namespace Engine {
     {
     }
 
-    SocketOStream::~SocketOStream()
-    {
-        flush();
-    }
+    SocketOStream::~SocketOStream() { flush(); }
 
     // SocketServer implementation
 
@@ -103,10 +97,7 @@ namespace Engine {
     {
     }
 
-    SocketServer::~SocketServer()
-    {
-        close();
-    }
+    SocketServer::~SocketServer() { close(); }
 
     bool SocketServer::init_sockets()
     {
@@ -143,9 +134,9 @@ namespace Engine {
         // Bind to port
         sockaddr_in addr;
         std::memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
+        addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = INADDR_ANY;  // Listen on all interfaces
-        addr.sin_port = htons(static_cast<unsigned short>(port));
+        addr.sin_port        = htons(static_cast<unsigned short>(port));
 
         if (::bind(server_socket_, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
             ::closesocket(server_socket_);
@@ -171,7 +162,7 @@ namespace Engine {
 
         // Accept connection (blocking)
         sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
+        socklen_t client_len   = sizeof(client_addr);
         socket_t client_socket = ::accept(server_socket_, (sockaddr*)&client_addr, &client_len);
 
         return client_socket;

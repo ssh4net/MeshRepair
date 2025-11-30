@@ -1,14 +1,14 @@
 #include "mesh_loader.h"
-#include <CGAL/IO/polygon_mesh_io.h>
-#include <CGAL/IO/PLY.h>
 #include <CGAL/IO/OBJ.h>
 #include <CGAL/IO/OFF.h>
+#include <CGAL/IO/PLY.h>
+#include <CGAL/IO/polygon_mesh_io.h>
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <algorithm>
-#include <chrono>
 
 #ifdef HAVE_RAPIDOBJ
 #    include <rapidobj/rapidobj.hpp>
@@ -17,426 +17,347 @@
 namespace fs = std::filesystem;
 
 namespace MeshRepair {
+namespace MeshLoader {
 
-std::string MeshLoader::last_error_;
+    namespace {
+        std::string g_last_error;
+
+        void set_error(const std::string& msg) { g_last_error = msg; }
+    }  // namespace
 
 #ifdef HAVE_RAPIDOBJ
-std::optional<Mesh>
-MeshLoader::load_obj_rapidobj(const std::string& filename)
-{
-    auto start_time = std::chrono::high_resolution_clock::now();
+    static bool load_obj_rapidobj(const std::string& filename, Mesh* out_mesh)
+    {
+        auto start_time = std::chrono::high_resolution_clock::now();
+        auto result     = rapidobj::ParseFile(filename, rapidobj::MaterialLibrary::Ignore());
 
-    // ========== PHASE 1: Parse OBJ with RapidOBJ ==========
-    // Ignore materials - we only need geometry for hole filling
-    auto result = rapidobj::ParseFile(filename, rapidobj::MaterialLibrary::Ignore());
-
-    if (result.error) {
-        last_error_ = "RapidOBJ parse error: " + result.error.code.message() + " at line "
-                      + std::to_string(result.error.line_num);
-        if (!result.error.line.empty()) {
-            last_error_ += " [" + result.error.line + "]";
+        if (result.error) {
+            set_error("RapidOBJ parse error: " + result.error.code.message() + " at line "
+                      + std::to_string(result.error.line_num));
+            return false;
         }
-        return std::nullopt;
-    }
 
-    auto parse_time = std::chrono::high_resolution_clock::now();
+        if (!rapidobj::Triangulate(result)) {
+            set_error("RapidOBJ triangulation failed");
+            return false;
+        }
 
-    // ========== PHASE 2: Triangulate (convert quads to triangles) ==========
-    if (!rapidobj::Triangulate(result)) {
-        last_error_ = "RapidOBJ triangulation failed";
-        return std::nullopt;
-    }
+        const auto& positions = result.attributes.positions;
+        size_t num_vertices   = positions.size() / 3;
+        if (num_vertices == 0) {
+            set_error("Mesh has no vertices");
+            return false;
+        }
 
-    auto triangulate_time = std::chrono::high_resolution_clock::now();
+        size_t num_faces = 0;
+        for (const auto& shape : result.shapes) {
+            num_faces += shape.mesh.num_face_vertices.size();
+        }
+        if (num_faces == 0) {
+            set_error("Mesh has no faces");
+            return false;
+        }
 
-    // ========== PHASE 3: Count geometry ==========
-    const auto& positions = result.attributes.positions;
-    size_t num_vertices   = positions.size() / 3;
+        Mesh mesh;
+        mesh.reserve(num_vertices, num_faces * 3, num_faces);
 
-    size_t num_faces = 0;
-    for (const auto& shape : result.shapes) {
-        num_faces += shape.mesh.num_face_vertices.size();
-    }
+        std::vector<Mesh::Vertex_index> vertex_map(num_vertices);
+        for (size_t i = 0; i < num_vertices; ++i) {
+            size_t idx = i * 3;
+            Point_3 p(static_cast<double>(positions[idx + 0]), static_cast<double>(positions[idx + 1]),
+                      static_cast<double>(positions[idx + 2]));
+            vertex_map[i] = mesh.add_vertex(p);
+        }
 
-    if (num_vertices == 0) {
-        last_error_ = "Mesh has no vertices";
-        return std::nullopt;
-    }
+        // Release heavy arrays early
+        auto shapes = std::move(result.shapes);
+        result      = {};
 
-    if (num_faces == 0) {
-        last_error_ = "Mesh has no faces";
-        return std::nullopt;
-    }
+        size_t faces_added  = 0;
+        size_t faces_failed = 0;
 
-    // ========== PHASE 4: Pre-allocate CGAL mesh ==========
-    Mesh mesh;
+        for (const auto& shape : shapes) {
+            const auto& shape_mesh = shape.mesh;
+            size_t idx             = 0;
 
-    // Reserve capacity (avoids reallocation)
-    // Conservative estimate: faces * 3 edges (actual ~1.5x faces for manifold mesh)
-    mesh.reserve(num_vertices, num_faces * 3, num_faces);
+            for (size_t f = 0; f < shape_mesh.num_face_vertices.size(); ++f) {
+                uint8_t num_verts = shape_mesh.num_face_vertices[f];
+                if (num_verts == 3) {
+                    auto v0 = vertex_map[shape_mesh.indices[idx + 0].position_index];
+                    auto v1 = vertex_map[shape_mesh.indices[idx + 1].position_index];
+                    auto v2 = vertex_map[shape_mesh.indices[idx + 2].position_index];
 
-    // ========== PHASE 5: Add vertices ==========
-    std::vector<Mesh::Vertex_index> vertex_map(num_vertices);
-
-    for (size_t i = 0; i < num_vertices; ++i) {
-        size_t idx = i * 3;
-        Point_3 p(static_cast<double>(positions[idx + 0]), static_cast<double>(positions[idx + 1]),
-                  static_cast<double>(positions[idx + 2]));
-        vertex_map[i] = mesh.add_vertex(p);
-    }
-
-    auto vertices_time = std::chrono::high_resolution_clock::now();
-
-    // ========== PHASE 6: Release RapidOBJ memory early ==========
-    // Keep only shapes (indices), release positions array
-    auto shapes = std::move(result.shapes);
-    result      = {};  // Free positions, normals, texcoords
-
-    // ========== PHASE 7: Add faces ==========
-    size_t faces_added  = 0;
-    size_t faces_failed = 0;
-
-    for (const auto& shape : shapes) {
-        const auto& shape_mesh = shape.mesh;
-        size_t idx             = 0;
-
-        for (size_t f = 0; f < shape_mesh.num_face_vertices.size(); ++f) {
-            uint8_t num_verts = shape_mesh.num_face_vertices[f];
-
-            if (num_verts == 3) {
-                auto v0 = vertex_map[shape_mesh.indices[idx + 0].position_index];
-                auto v1 = vertex_map[shape_mesh.indices[idx + 1].position_index];
-                auto v2 = vertex_map[shape_mesh.indices[idx + 2].position_index];
-
-                if (mesh.add_face(v0, v1, v2) != Mesh::null_face()) {
-                    ++faces_added;
+                    if (mesh.add_face(v0, v1, v2) != Mesh::null_face()) {
+                        ++faces_added;
+                    } else {
+                        ++faces_failed;
+                    }
                 } else {
                     ++faces_failed;
                 }
-            } else {
-                // Should not happen after triangulation
-                ++faces_failed;
+                idx += num_verts;
             }
-
-            idx += num_verts;
         }
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto total_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+        std::cerr << "Loaded mesh from: " << filename << " (RapidOBJ)\n"
+                  << "  Vertices: " << mesh.number_of_vertices() << "\n"
+                  << "  Faces: " << mesh.number_of_faces() << " (added: " << faces_added;
+        if (faces_failed > 0) {
+            std::cerr << ", failed: " << faces_failed;
+        }
+        std::cerr << ")\n"
+                  << "  Edges: " << mesh.number_of_edges() << "\n"
+                  << "  Total time: " << total_ms << " ms\n";
+
+        if (faces_failed > 0) {
+            std::cerr << "Warning: " << faces_failed << " faces failed to add (non-manifold or duplicate)\n";
+        }
+
+        *out_mesh = std::move(mesh);
+        return true;
     }
 
-    auto faces_time = std::chrono::high_resolution_clock::now();
-    auto total_time = std::chrono::duration<double, std::milli>(faces_time - start_time).count();
+    static bool load_obj_rapidobj_as_soup(const std::string& filename, PolygonSoup* out_soup)
+    {
+        auto start_time = std::chrono::high_resolution_clock::now();
+        auto result     = rapidobj::ParseFile(filename, rapidobj::MaterialLibrary::Ignore());
 
-    // ========== PHASE 8: Report ==========
-    std::cerr << "Loaded mesh from: " << filename << "\n"
-              << "  Vertices: " << mesh.number_of_vertices() << "\n"
-              << "  Faces: " << mesh.number_of_faces() << " (added: " << faces_added;
+        if (result.error) {
+            set_error("RapidOBJ parse error: " + result.error.code.message() + " at line "
+                      + std::to_string(result.error.line_num));
+            return false;
+        }
 
-    if (faces_failed > 0) {
-        std::cerr << ", failed: " << faces_failed;
-    }
+        if (!rapidobj::Triangulate(result)) {
+            set_error("RapidOBJ triangulation failed");
+            return false;
+        }
 
-    std::cerr << ")\n"
-              << "  Edges: " << mesh.number_of_edges() << "\n"
-              << "  Timing:\n"
-              << "    Parse: " << std::chrono::duration<double, std::milli>(parse_time - start_time).count() << " ms\n"
-              << "    Triangulate: " << std::chrono::duration<double, std::milli>(triangulate_time - parse_time).count()
-              << " ms\n"
-              << "    Add vertices: "
-              << std::chrono::duration<double, std::milli>(vertices_time - triangulate_time).count() << " ms\n"
-              << "    Add faces: " << std::chrono::duration<double, std::milli>(faces_time - vertices_time).count()
-              << " ms\n"
-              << "    Total: " << total_time << " ms\n";
+        PolygonSoup soup;
+        const auto& positions = result.attributes.positions;
+        size_t num_vertices   = positions.size() / 3;
+        soup.points.reserve(num_vertices);
+        for (size_t i = 0; i < num_vertices; ++i) {
+            size_t idx = i * 3;
+            soup.points.emplace_back(static_cast<double>(positions[idx + 0]), static_cast<double>(positions[idx + 1]),
+                                     static_cast<double>(positions[idx + 2]));
+        }
 
-    if (faces_failed > 0) {
-        std::cerr << "Warning: " << faces_failed << " faces failed to add (non-manifold or duplicate)\n";
-    }
+        size_t num_faces = 0;
+        for (const auto& shape : result.shapes) {
+            num_faces += shape.mesh.num_face_vertices.size();
+        }
+        soup.polygons.reserve(num_faces);
 
-    return mesh;
-}
-
-std::optional<PolygonSoup>
-MeshLoader::load_obj_rapidobj_as_soup(const std::string& filename)
-{
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    // Parse OBJ with RapidOBJ
-    auto result = rapidobj::ParseFile(filename, rapidobj::MaterialLibrary::Ignore());
-
-    if (result.error) {
-        last_error_ = "RapidOBJ parse error: " + result.error.code.message() + " at line "
-                      + std::to_string(result.error.line_num);
-        return std::nullopt;
-    }
-
-    // Triangulate
-    if (!rapidobj::Triangulate(result)) {
-        last_error_ = "RapidOBJ triangulation failed";
-        return std::nullopt;
-    }
-
-    // Build polygon soup directly (no mesh conversion!)
-    PolygonSoup soup;
-
-    // Extract points
-    const auto& positions = result.attributes.positions;
-    size_t num_vertices = positions.size() / 3;
-    soup.points.reserve(num_vertices);
-
-    for (size_t i = 0; i < num_vertices; ++i) {
-        size_t idx = i * 3;
-        soup.points.emplace_back(
-            static_cast<double>(positions[idx + 0]),
-            static_cast<double>(positions[idx + 1]),
-            static_cast<double>(positions[idx + 2])
-        );
-    }
-
-    // Extract polygons
-    size_t num_faces = 0;
-    for (const auto& shape : result.shapes) {
-        num_faces += shape.mesh.num_face_vertices.size();
-    }
-    soup.polygons.reserve(num_faces);
-
-    for (const auto& shape : result.shapes) {
-        const auto& shape_mesh = shape.mesh;
-        size_t idx = 0;
-
-        for (size_t f = 0; f < shape_mesh.num_face_vertices.size(); ++f) {
-            uint8_t num_verts = shape_mesh.num_face_vertices[f];
-
-            if (num_verts == 3) {
-                std::vector<std::size_t> polygon;
-                polygon.reserve(3);
-                polygon.push_back(shape_mesh.indices[idx + 0].position_index);
-                polygon.push_back(shape_mesh.indices[idx + 1].position_index);
-                polygon.push_back(shape_mesh.indices[idx + 2].position_index);
-                soup.polygons.push_back(std::move(polygon));
+        for (const auto& shape : result.shapes) {
+            const auto& shape_mesh = shape.mesh;
+            size_t idx             = 0;
+            for (size_t f = 0; f < shape_mesh.num_face_vertices.size(); ++f) {
+                uint8_t num_verts = shape_mesh.num_face_vertices[f];
+                if (num_verts == 3) {
+                    std::vector<std::size_t> polygon;
+                    polygon.reserve(3);
+                    polygon.push_back(shape_mesh.indices[idx + 0].position_index);
+                    polygon.push_back(shape_mesh.indices[idx + 1].position_index);
+                    polygon.push_back(shape_mesh.indices[idx + 2].position_index);
+                    soup.polygons.push_back(std::move(polygon));
+                }
+                idx += num_verts;
             }
-
-            idx += num_verts;
         }
+
+        auto end_time     = std::chrono::high_resolution_clock::now();
+        soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        *out_soup         = std::move(soup);
+        return true;
     }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-
-    std::cerr << "Loaded polygon soup from: " << filename << " (RapidOBJ)\n"
-              << "  Points: " << soup.points.size() << "\n"
-              << "  Polygons: " << soup.polygons.size() << "\n"
-              << "  Load time: " << soup.load_time_ms << " ms\n";
-
-    return soup;
-}
 #endif  // HAVE_RAPIDOBJ
 
-std::optional<PolygonSoup>
-MeshLoader::load_as_soup(const std::string& filename, Format format, bool force_cgal_loader)
-{
-    last_error_.clear();
+    bool validate_input_file(const std::string& filename)
+    {
+        if (!fs::exists(filename) || !fs::is_regular_file(filename)) {
+            return false;
+        }
 
-    // Check file exists
-    if (!validate_input_file(filename)) {
-        last_error_ = "File not found or not readable: " + filename;
-        return std::nullopt;
+        std::ifstream file(filename);
+        return file.good();
     }
 
-    // Auto-detect format if needed
-    if (format == Format::AUTO) {
-        format = detect_format(filename);
-    }
-
-#ifdef HAVE_RAPIDOBJ
-    // Use RapidOBJ for OBJ files (10-50x faster than CGAL parser)
-    if (format == Format::OBJ && !force_cgal_loader) {
-        return load_obj_rapidobj_as_soup(filename);
-    }
-#endif
-
-    // Use CGAL's polygon soup readers for PLY, OBJ, OFF
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    PolygonSoup soup;
-    bool success = false;
-
-    if (format == Format::PLY) {
-        success = CGAL::IO::read_PLY(filename, soup.points, soup.polygons);
-    } else if (format == Format::OBJ) {
-        success = CGAL::IO::read_OBJ(filename, soup.points, soup.polygons);
-    } else if (format == Format::OFF) {
-        success = CGAL::IO::read_OFF(filename, soup.points, soup.polygons);
-    } else {
-        last_error_ = "Unsupported format for soup loading";
-        return std::nullopt;
-    }
-
-    if (!success) {
-        last_error_ = "Failed to parse polygon soup from file: " + filename;
-        return std::nullopt;
-    }
-
-    // Validate
-    if (soup.points.empty()) {
-        last_error_ = "Polygon soup has no points";
-        return std::nullopt;
-    }
-
-    if (soup.polygons.empty()) {
-        last_error_ = "Polygon soup has no polygons";
-        return std::nullopt;
-    }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-
-    std::cerr << "Loaded polygon soup from: " << filename;
-    if (format == Format::OBJ) {
-        std::cerr << " (CGAL OBJ parser)";
-    }
-    std::cerr << "\n"
-              << "  Points: " << soup.points.size() << "\n"
-              << "  Polygons: " << soup.polygons.size() << "\n"
-              << "  Load time: " << soup.load_time_ms << " ms\n";
-
-    return soup;
-}
-
-std::optional<Mesh>
-MeshLoader::load(const std::string& filename, Format format, bool force_cgal_loader)
-{
-    last_error_.clear();
-
-    // Check file exists
-    if (!validate_input_file(filename)) {
-        last_error_ = "File not found or not readable: " + filename;
-        return std::nullopt;
-    }
-
-    // Auto-detect format if needed
-    if (format == Format::AUTO) {
-        format = detect_format(filename);
-    }
-
-#ifdef HAVE_RAPIDOBJ
-    // Use RapidOBJ for OBJ files (10-50x faster than CGAL parser)
-    // unless user explicitly requests CGAL loader
-    if (format == Format::OBJ && !force_cgal_loader) {
-        return load_obj_rapidobj(filename);
-    }
-#endif
-
-    // Use CGAL's I/O for other formats (PLY, OFF, etc.)
-    // or for OBJ when CGAL loader is explicitly requested
-    Mesh mesh;
-    bool success = CGAL::IO::read_polygon_mesh(filename, mesh);
-
-    if (!success) {
-        last_error_ = "Failed to parse mesh file: " + filename;
-        return std::nullopt;
-    }
-
-    // Validate basic properties
-    if (mesh.number_of_vertices() == 0) {
-        last_error_ = "Mesh has no vertices";
-        return std::nullopt;
-    }
-
-    if (mesh.number_of_faces() == 0) {
-        last_error_ = "Mesh has no faces";
-        return std::nullopt;
-    }
-
-    std::cerr << "Loaded mesh from: " << filename;
-    if (format == Format::OBJ) {
-        std::cerr << " (CGAL OBJ parser)";
-    }
-    std::cerr << "\n"
-              << "  Vertices: " << mesh.number_of_vertices() << "\n"
-              << "  Faces: " << mesh.number_of_faces() << "\n"
-              << "  Edges: " << mesh.number_of_edges() << "\n";
-
-    return mesh;
-}
-
-bool
-MeshLoader::save(const Mesh& mesh, const std::string& filename, Format format, bool binary_ply)
-{
-    last_error_.clear();
-
-    // Auto-detect format if needed
-    if (format == Format::AUTO) {
-        format = detect_format(filename);
-    }
-
-    bool success = false;
-
-    // Use format-specific writers for proper output
-    if (format == Format::PLY) {
-        // PLY: binary by default for efficiency (faster I/O and smaller files)
-        // Can be overridden with binary_ply parameter
-        success = CGAL::IO::write_PLY(filename, mesh, CGAL::parameters::use_binary_mode(binary_ply));
-    } else if (format == Format::OBJ) {
-        // OBJ: always ASCII (specification requirement)
-        success = CGAL::IO::write_OBJ(filename, mesh);
-    } else if (format == Format::OFF) {
-        // OFF: always ASCII
-        success = CGAL::IO::write_OFF(filename, mesh);
-    } else {
-        // Generic writer (auto-detects from extension)
-        success = CGAL::IO::write_polygon_mesh(filename, mesh);
-    }
-
-    if (!success) {
-        last_error_ = "Failed to write mesh to file: " + filename;
-        return false;
-    }
-
-    std::cerr << "Saved mesh to: " << filename << "\n"
-              << "  Vertices: " << mesh.number_of_vertices() << "\n"
-              << "  Faces: " << mesh.number_of_faces() << "\n";
-
-    return true;
-}
-
-bool
-MeshLoader::validate_input_file(const std::string& filename)
-{
-    if (!fs::exists(filename)) {
-        return false;
-    }
-
-    if (!fs::is_regular_file(filename)) {
-        return false;
-    }
-
-    // Check if readable
-    std::ifstream file(filename);
-    return file.good();
-}
-
-const std::string&
-MeshLoader::get_last_error()
-{
-    return last_error_;
-}
-
-MeshLoader::Format
-MeshLoader::detect_format(const std::string& filename)
-{
-    auto ext = fs::path(filename).extension().string();
-
-    // Convert to lowercase
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
-
-    if (ext == ".obj") {
+    Format detect_format(const std::string& filename)
+    {
+        auto ext = fs::path(filename).extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+        if (ext == ".obj") {
+            return Format::OBJ;
+        }
+        if (ext == ".ply") {
+            return Format::PLY;
+        }
+        if (ext == ".off") {
+            return Format::OFF;
+        }
         return Format::OBJ;
-    } else if (ext == ".ply") {
-        return Format::PLY;
-    } else if (ext == ".off") {
-        return Format::OFF;
     }
 
-    // Default to OBJ
-    return Format::OBJ;
+    bool load_soup(const std::string& filename, Format format, bool force_cgal_loader, PolygonSoup* out_soup)
+    {
+        if (!out_soup) {
+            set_error("Output soup pointer is null");
+            return false;
+        }
+        if (!validate_input_file(filename)) {
+            set_error("File not found or not readable: " + filename);
+            return false;
+        }
+
+        if (format == Format::AUTO) {
+            format = detect_format(filename);
+        }
+
+#ifdef HAVE_RAPIDOBJ
+        if (format == Format::OBJ && !force_cgal_loader) {
+            return load_obj_rapidobj_as_soup(filename, out_soup);
+        }
+#endif
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        PolygonSoup soup;
+        bool success = false;
+
+        if (format == Format::PLY) {
+            success = CGAL::IO::read_PLY(filename, soup.points, soup.polygons);
+        } else if (format == Format::OBJ) {
+            success = CGAL::IO::read_OBJ(filename, soup.points, soup.polygons);
+        } else if (format == Format::OFF) {
+            success = CGAL::IO::read_OFF(filename, soup.points, soup.polygons);
+        } else {
+            set_error("Unsupported format for soup loading");
+            return false;
+        }
+
+        if (!success) {
+            set_error("Failed to parse polygon soup from file: " + filename);
+            return false;
+        }
+        if (soup.points.empty()) {
+            set_error("Polygon soup has no points");
+            return false;
+        }
+        if (soup.polygons.empty()) {
+            set_error("Polygon soup has no polygons");
+            return false;
+        }
+
+        auto end_time     = std::chrono::high_resolution_clock::now();
+        soup.load_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+        *out_soup = std::move(soup);
+        return true;
+    }
+
+    bool load_mesh(const std::string& filename, Format format, bool force_cgal_loader, Mesh* out_mesh)
+    {
+        if (!out_mesh) {
+            set_error("Output mesh pointer is null");
+            return false;
+        }
+        if (!validate_input_file(filename)) {
+            set_error("File not found or not readable: " + filename);
+            return false;
+        }
+
+        if (format == Format::AUTO) {
+            format = detect_format(filename);
+        }
+
+#ifdef HAVE_RAPIDOBJ
+        if (format == Format::OBJ && !force_cgal_loader) {
+            return load_obj_rapidobj(filename, out_mesh);
+        }
+#endif
+
+        Mesh mesh;
+        bool success = CGAL::IO::read_polygon_mesh(filename, mesh);
+        if (!success) {
+            set_error("Failed to parse mesh file: " + filename);
+            return false;
+        }
+        if (mesh.number_of_vertices() == 0) {
+            set_error("Mesh has no vertices");
+            return false;
+        }
+        if (mesh.number_of_faces() == 0) {
+            set_error("Mesh has no faces");
+            return false;
+        }
+
+        *out_mesh = std::move(mesh);
+        return true;
+    }
+
+    bool save_mesh(const Mesh& mesh, const std::string& filename, Format format, bool binary_ply)
+    {
+        if (format == Format::AUTO) {
+            format = detect_format(filename);
+        }
+
+        bool success = false;
+        if (format == Format::PLY) {
+            success = CGAL::IO::write_PLY(filename, mesh, CGAL::parameters::use_binary_mode(binary_ply));
+        } else if (format == Format::OBJ) {
+            success = CGAL::IO::write_OBJ(filename, mesh);
+        } else if (format == Format::OFF) {
+            success = CGAL::IO::write_OFF(filename, mesh);
+        } else {
+            success = CGAL::IO::write_polygon_mesh(filename, mesh);
+        }
+
+        if (!success) {
+            set_error("Failed to write mesh to file: " + filename);
+            return false;
+        }
+        return true;
+    }
+
+    const std::string& last_error() { return g_last_error; }
+
+}  // namespace MeshLoader
+
+int
+mesh_loader_load(const char* filename, MeshLoader::Format format, bool force_cgal_loader, Mesh* out_mesh)
+{
+    if (!filename || !out_mesh) {
+        return -1;
+    }
+    return MeshLoader::load_mesh(std::string(filename), format, force_cgal_loader, out_mesh) ? 0 : -1;
+}
+
+int
+mesh_loader_load_soup(const char* filename, MeshLoader::Format format, bool force_cgal_loader, PolygonSoup* out_soup)
+{
+    if (!filename || !out_soup) {
+        return -1;
+    }
+    return MeshLoader::load_soup(std::string(filename), format, force_cgal_loader, out_soup) ? 0 : -1;
+}
+
+int
+mesh_loader_save(const Mesh& mesh, const char* filename, MeshLoader::Format format, bool binary_ply)
+{
+    if (!filename) {
+        return -1;
+    }
+    return MeshLoader::save_mesh(mesh, std::string(filename), format, binary_ply) ? 0 : -1;
+}
+
+const char*
+mesh_loader_last_error()
+{
+    return MeshLoader::last_error().c_str();
 }
 
 }  // namespace MeshRepair

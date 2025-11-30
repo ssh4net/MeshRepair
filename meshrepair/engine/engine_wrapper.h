@@ -2,27 +2,24 @@
 
 #include "../include/types.h"
 #include "../include/mesh_loader.h"
-#include "../include/hole_detector.h"
-#include "../include/hole_filler.h"
+#include "../include/hole_ops.h"
 #include "../include/mesh_preprocessor.h"
-#include "../include/thread_manager.h"
-#include "../include/parallel_hole_filler.h"
-#include "../include/pipeline_processor.h"
+#include "../include/worker_pool.h"
+#include "../include/pipeline_ops.h"
 
 #include <nlohmann/json.hpp>
 #include <string>
 #include <memory>
 #include <functional>
-#include <optional>
 #include <fstream>
 
 namespace MeshRepair {
 namespace Engine {
 
-    // Callback types for progress reporting and logging
-    using ProgressCallback    = std::function<void(double progress, const std::string& status)>;
-    using LogCallback         = std::function<void(const std::string& level, const std::string& message)>;
-    using CancelCheckCallback = std::function<bool()>;  // Returns true if operation should be cancelled
+    // Callback types for progress reporting and logging (C-style function pointers)
+    using ProgressCallback    = void (*)(double progress, const std::string& status, void* user);
+    using LogCallback         = void (*)(const std::string& level, const std::string& message, void* user);
+    using CancelCheckCallback = bool (*)(void* user);  // Returns true if operation should be cancelled
 
     // Engine state
     enum class EngineState {
@@ -49,9 +46,21 @@ namespace Engine {
         EngineState get_state() const { return state_; }
 
         // Callbacks
-        void set_progress_callback(ProgressCallback callback) { progress_callback_ = callback; }
-        void set_log_callback(LogCallback callback) { log_callback_ = callback; }
-        void set_cancel_check_callback(CancelCheckCallback callback) { cancel_check_callback_ = callback; }
+        void set_progress_callback(ProgressCallback callback, void* user = nullptr)
+        {
+            progress_callback_ = callback;
+            progress_user_     = user;
+        }
+        void set_log_callback(LogCallback callback, void* user = nullptr)
+        {
+            log_callback_ = callback;
+            log_user_     = user;
+        }
+        void set_cancel_check_callback(CancelCheckCallback callback, void* user = nullptr)
+        {
+            cancel_check_callback_ = callback;
+            cancel_user_           = user;
+        }
 
         // Mesh operations
         void load_mesh(const std::string& file_path, bool force_cgal_loader = false);
@@ -64,12 +73,13 @@ namespace Engine {
         nlohmann::json save_mesh_to_data();
 
         // Query state
-        bool has_mesh() const { return mesh_.has_value() || soup_.has_value(); }
+        bool has_mesh() const { return has_mesh_ || has_soup_; }
         bool has_holes_detected() const { return holes_detected_; }
 
         // Direct mesh access (for binary serialization)
         const Mesh& get_mesh() const;
         void set_mesh(Mesh&& mesh);
+        void set_soup(PolygonSoup&& soup);
 
         // Selection boundary info (for edit mode selection support)
         void set_boundary_vertex_indices(const std::vector<uint32_t>& indices);
@@ -91,8 +101,10 @@ namespace Engine {
     private:
         // State
         EngineState state_;
-        std::optional<PolygonSoup> soup_;  // Soup-based workflow (optimized)
-        std::optional<Mesh> mesh_;         // Mesh created after preprocessing or on-demand
+        bool has_soup_ = false;
+        bool has_mesh_ = false;
+        PolygonSoup soup_storage_;  // Soup-based workflow (optimized)
+        Mesh mesh_storage_;         // Mesh created after preprocessing or on-demand
         bool holes_detected_;
 
         // Statistics
@@ -105,8 +117,11 @@ namespace Engine {
 
         // Callbacks
         ProgressCallback progress_callback_;
+        void* progress_user_ = nullptr;
         LogCallback log_callback_;
+        void* log_user_ = nullptr;
         CancelCheckCallback cancel_check_callback_;
+        void* cancel_user_ = nullptr;
 
         // Debug mode
         bool debug_mode_;
@@ -116,8 +131,9 @@ namespace Engine {
         std::string log_file_path_;
 
         // Selection boundary info (for edit mode selection support)
-        std::vector<uint32_t> boundary_vertex_indices_;  // Vertex indices on selection boundary
-        double reference_bbox_diagonal_;  // Full object bbox diagonal (0 = use mesh bbox)
+        std::vector<uint32_t> boundary_vertex_indices_;   // Vertex indices on selection boundary
+        std::vector<Point_3> boundary_vertex_positions_;  // Positions captured at load time
+        double reference_bbox_diagonal_;                  // Full object bbox diagonal (0 = use mesh bbox)
 
         // Helper methods
         void log(const std::string& level, const std::string& message);
@@ -126,6 +142,8 @@ namespace Engine {
         void ensure_state(EngineState expected_state, const std::string& operation);
         void ensure_mesh_exists();  // Convert soup→mesh if needed (for operations requiring mesh)
         void dump_debug_mesh(const std::string& prefix, const std::string& description);
+        void capture_boundary_positions();
+        void remap_boundary_indices_after_preprocess();
     };
 
 }  // namespace Engine

@@ -2,7 +2,7 @@
 #define MESHREPAIR_PARALLEL_DETECTION_H
 
 #include "types.h"
-#include "threadpool.h"
+#include "worker_pool.h"
 #include "parallel_utils.h"
 #include <vector>
 #include <future>
@@ -17,48 +17,22 @@ namespace MeshRepair {
  * @return Vector of border halfedges
  */
 inline std::vector<halfedge_descriptor>
-find_border_halfedges_parallel(const Mesh& mesh, ThreadPool& pool, bool verbose = false)
+find_border_halfedges_parallel(const Mesh& mesh, ThreadPool& /*pool*/, bool verbose = false)
 {
+    // Simplified: sequential scan (fire-and-forget pool not used to avoid futures)
     if (verbose) {
-        std::cout << "  [Parallel] Finding border halfedges using " << pool.threadCount() << " thread(s)...\n";
+        std::cerr << "  [Parallel] Finding border halfedges (sequential fallback)\n";
     }
-
-    // Partition halfedges
-    auto partitions = partition_halfedges(mesh, pool.threadCount());
-
-    if (partitions.empty()) {
-        return std::vector<halfedge_descriptor>();
-    }
-
-    // Launch parallel search tasks
-    std::vector<std::future<std::vector<halfedge_descriptor>>> futures;
-
-    for (const auto& partition : partitions) {
-        futures.push_back(pool.enqueue([&mesh, partition]() {
-            std::vector<halfedge_descriptor> local_borders;
-
-            // Check each halfedge in this partition
-            for (auto h : partition.descriptors) {
-                if (mesh.is_border(h)) {
-                    local_borders.push_back(h);
-                }
-            }
-
-            return local_borders;
-        }));
-    }
-
-    // Gather results
     std::vector<halfedge_descriptor> all_borders;
-    for (auto& future : futures) {
-        auto local = future.get();
-        all_borders.insert(all_borders.end(), local.begin(), local.end());
+    all_borders.reserve(mesh.number_of_halfedges());
+    for (auto h : mesh.halfedges()) {
+        if (mesh.is_border(h)) {
+            all_borders.push_back(h);
+        }
     }
-
     if (verbose) {
-        std::cout << "  [Parallel] Found " << all_borders.size() << " border halfedges\n";
+        std::cerr << "  [Parallel] Found " << all_borders.size() << " border halfedges\n";
     }
-
     return all_borders;
 }
 

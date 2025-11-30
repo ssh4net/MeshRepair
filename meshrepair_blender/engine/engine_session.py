@@ -16,6 +16,7 @@ High-level API for mesh repair operations using the engine subprocess.
 import os
 import sys
 import tempfile
+import time
 from .manager import EngineManager
 from ..utils.mesh_binary import encode_mesh_base64, decode_mesh_base64
 
@@ -51,6 +52,9 @@ class EngineSession:
         self.log_file_path = None
 
         resolved_temp = (temp_dir or "").strip()
+        if not resolved_temp and self.engine_path:
+            candidate = os.path.join(os.path.dirname(self.engine_path), "Debug")
+            resolved_temp = candidate
         if not resolved_temp and self.verbosity >= 4:
             resolved_temp = tempfile.gettempdir()
         if resolved_temp:
@@ -138,10 +142,25 @@ class EngineSession:
         self.manager.start()
 
         # Create temp log file for engine
-        import tempfile
-        log_fd, log_path = tempfile.mkstemp(suffix='.log', prefix='meshrepair_engine_')
-        import os
-        os.close(log_fd)  # Close fd, engine will open it
+        log_path = None
+        if self.temp_dir:
+            try:
+                os.makedirs(self.temp_dir, exist_ok=True)
+            except OSError:
+                pass
+            log_path = os.path.join(self.temp_dir, f"meshrepair_engine_{int(time.time())}.log")
+            try:
+                with open(log_path, "w", encoding="utf-8"):
+                    pass
+            except OSError:
+                log_path = None
+
+        if not log_path:
+            import tempfile
+            log_fd, tmp_path = tempfile.mkstemp(suffix='.log', prefix='meshrepair_engine_')
+            os.close(log_fd)  # Close fd, engine will open it
+            log_path = tmp_path
+
         self.log_file_path = log_path
 
         print(f"[MeshRepair INFO] Engine log file: {log_path}")
@@ -160,24 +179,24 @@ class EngineSession:
             init_cmd["params"]["temp_dir"] = self.temp_dir
 
         if self.batch_mode:
-            # Batch mode: queue command instead of sending
-            self.command_queue.append(init_cmd)
-            self.batch_started = True
-            return {"type": "success", "message": "Init queued for batch"}
+            # Batch mode: send init immediately (keep stdin open for subsequent commands)
+            self.manager.send_command(init_cmd)
+            response = self.manager.read_response(timeout=5.0)
         else:
             # Interactive mode: send and wait for response
             self.manager.send_command(init_cmd)
             response = self.manager.read_response(timeout=5.0)
-            if response.get('type') == 'error':
-                raise RuntimeError(f"Engine init failed: {response.get('error', {}).get('message', 'Unknown error')}")
 
-            # Store version and build info
-            self.engine_version = response.get('version', 'unknown')
-            self.build_date = response.get('build_date', 'unknown')
-            self.build_time = response.get('build_time', 'unknown')
-            print(f"[MeshRepair INFO] Engine version: {self.engine_version}, built: {self.build_date} {self.build_time}")
-            sys.stdout.flush()
-            return response
+        if response.get('type') == 'error':
+            raise RuntimeError(f"Engine init failed: {response.get('error', {}).get('message', 'Unknown error')}")
+
+        # Store version and build info
+        self.engine_version = response.get('version', 'unknown')
+        self.build_date = response.get('build_date', 'unknown')
+        self.build_time = response.get('build_time', 'unknown')
+        print(f"[MeshRepair INFO] Engine version: {self.engine_version}, built: {self.build_date} {self.build_time}")
+        sys.stdout.flush()
+        return response
 
     def test(self):
         """
@@ -225,18 +244,18 @@ class EngineSession:
         cmd = {
             "command": "load_mesh",
             "params": {
-                "mesh_data_binary": mesh_binary
+                "mesh_data_binary": mesh_binary,
+                "vertex_count": len(mesh_data['vertices']),
+                "face_count": len(mesh_data['faces'])
             }
         }
 
         # Add selection boundary info if available
         if selection_info and selection_info.selection_only:
             # Pass boundary vertex indices (indices of vertices on selection boundary)
-            boundary_indices = [
-                i for i, is_boundary in enumerate(selection_info.boundary_vertex_flags)
-                if is_boundary
-            ]
-            cmd["params"]["boundary_vertex_indices"] = boundary_indices
+            boundary_indices = list(getattr(selection_info, "engine_boundary_indices", []) or [])
+            if boundary_indices:
+                cmd["params"]["boundary_vertex_indices"] = boundary_indices
 
             # Pass the full object bbox diagonal for proper hole diameter ratio calculation
             if selection_info.object_bbox_diagonal > 0:

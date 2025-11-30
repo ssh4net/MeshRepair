@@ -79,7 +79,8 @@ Photogrammetry (RealityScan, Metashape, 3DF Zephir, ...)
 | **Surface Continuity** | Supports C⁰, C¹, and C² continuity for filled regions |
 | **Blender Integration** | Native addon with Edit Mode selection support |
 | **Command Line Interface** | Batch processing and scripting support |
-| **Multi-threaded Processing** | Parallel hole filling for large meshes |
+| **Multi-threaded Processing** | Parallel hole filling with partition count capped by hole count |
+| **Partition Tuning** | Minimum edge budget per partition (`--min-edges`) to avoid oversharding tiny holes |
 
 ---
 

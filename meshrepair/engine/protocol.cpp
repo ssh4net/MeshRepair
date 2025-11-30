@@ -57,8 +57,7 @@ namespace Engine {
         uint16_t magic = bytes_to_uint16_le(frame_header);
         if (magic != PROTOCOL_MAGIC) {
             std::ostringstream oss;
-            oss << "Protocol desynchronization: expected magic 0x" << std::hex << PROTOCOL_MAGIC << ", got 0x"
-                << magic;
+            oss << "Protocol desynchronization: expected magic 0x" << std::hex << PROTOCOL_MAGIC << ", got 0x" << magic;
             throw std::runtime_error(oss.str());
         }
 

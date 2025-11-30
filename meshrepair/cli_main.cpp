@@ -1,12 +1,10 @@
 #include "mesh_loader.h"
-#include "hole_detector.h"
-#include "hole_filler.h"
+#include "hole_ops.h"
 #include "mesh_validator.h"
 #include "progress_reporter.h"
 #include "mesh_preprocessor.h"
-#include "thread_manager.h"
-#include "pipeline_processor.h"
-#include "parallel_hole_filler.h"
+#include "worker_pool.h"
+#include "pipeline_ops.h"
 #include "config.h"
 #include "debug_path.h"
 #include "help_printer.h"
@@ -26,9 +24,9 @@ struct CommandLineArgs {
     std::string input_file;
     std::string output_file;
     FillingOptions filling_options;
-    int verbosity   = 1;       // 0=quiet, 1=info(stats), 2=verbose, 3=debug, 4=trace(PLY dumps)
-    bool validate   = false;
-    bool ascii_ply  = false;  // Use ASCII PLY instead of binary
+    int verbosity  = 1;  // 0=quiet, 1=info(stats), 2=verbose, 3=debug, 4=trace(PLY dumps)
+    bool validate  = false;
+    bool ascii_ply = false;  // Use ASCII PLY instead of binary
 
     // Preprocessing options
     bool enable_preprocessing              = true;
@@ -88,6 +86,8 @@ struct CommandLineArgs {
                 filling_options.skip_cubic_search = true;
             } else if (arg == "--no-refine") {
                 filling_options.refine = false;
+            } else if (arg == "--holes_only") {
+                filling_options.holes_only = true;
             } else if (arg == "--verbose" || arg == "-v") {
                 // Check if next arg is a number
                 if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -135,6 +135,8 @@ struct CommandLineArgs {
                 }
             } else if (arg == "--no-partition") {
                 use_partitioned = false;
+            } else if (arg == "--min-edges" && i + 1 < argc) {
+                filling_options.min_partition_boundary_edges = std::stoul(argv[++i]);
             } else if (arg == "--cgal-loader") {
                 force_cgal_loader = true;
             } else {
@@ -172,9 +174,11 @@ cli_main(int argc, char** argv)
 
     args.filling_options.verbose       = verbose;
     args.filling_options.show_progress = (args.verbosity > 0);
+    args.filling_options.keep_largest_component = args.preprocess_keep_largest_component;
 
     if (args.verbosity > 0) {
-        std::cout << "=== MeshHoleFiller v" << Config::VERSION << " ===\n\n";
+        std::cout << "=== MeshHoleFiller v" << Config::VERSION << " ===\n";
+        std::cout << " Bult: " << Config::BUILD_DATE << " " << Config::BUILD_TIME << "\n\n";
     }
 
     // Step 1: Load mesh as polygon soup (optimized - avoids mesh construction)
@@ -182,14 +186,12 @@ cli_main(int argc, char** argv)
         std::cout << "Loading mesh from: " << args.input_file << "\n";
     }
 
-    auto soup_opt = MeshLoader::load_as_soup(args.input_file, MeshLoader::Format::AUTO, args.force_cgal_loader);
-    if (!soup_opt) {
-        std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
+    PolygonSoup soup;
+    Mesh mesh;  // Will be populated during preprocessing or immediately if no preprocessing
+    if (mesh_loader_load_soup(args.input_file.c_str(), MeshLoader::Format::AUTO, args.force_cgal_loader, &soup) != 0) {
+        std::cout << "Error: " << mesh_loader_last_error() << "\n";
         return 1;
     }
-
-    PolygonSoup soup = std::move(soup_opt.value());
-    Mesh mesh;  // Will be populated during preprocessing or immediately if no preprocessing
 
     if (verbose) {
         std::cout << "Loaded polygon soup from: " << args.input_file << "\n";
@@ -204,7 +206,8 @@ cli_main(int argc, char** argv)
     thread_config.queue_size  = args.queue_size;
     thread_config.verbose     = verbose;
 
-    ThreadManager thread_manager(thread_config);
+    ThreadManager thread_manager;
+    thread_manager_init(thread_manager, thread_config);
 
     // Step 1.5: Preprocess soup and convert to mesh (OPTIMIZED - single conversion!)
     PreprocessingStats prep_stats;
@@ -212,7 +215,7 @@ cli_main(int argc, char** argv)
     if (args.enable_preprocessing) {
         // Debug: Save original loaded soup before any preprocessing
         if (debug) {
-            std::string debug_file = DebugPath::resolve("debug_00_original_loaded.ply");
+            std::string debug_file = DebugPath::step_file("original_loaded");
             // Convert soup to temporary mesh for debug output
             Mesh debug_mesh;
             PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);
@@ -247,7 +250,8 @@ cli_main(int argc, char** argv)
             std::cout << "Connected components found: " << prep_stats.connected_components_found << "\n";
             std::cout << "Small components removed: " << prep_stats.small_components_removed << "\n";
             std::cout << "Timing breakdown:\n";
-            std::cout << "  Soup cleanup: " << std::fixed << std::setprecision(2) << prep_stats.soup_cleanup_time_ms << " ms\n";
+            std::cout << "  Soup cleanup: " << std::fixed << std::setprecision(2) << prep_stats.soup_cleanup_time_ms
+                      << " ms\n";
             std::cout << "  Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n";
             std::cout << "  Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n";
             std::cout << "  Total: " << prep_stats.total_time_ms << " ms\n";
@@ -289,29 +293,40 @@ cli_main(int argc, char** argv)
     // Step 2 & 3: Detect and fill holes (with threading)
     MeshStatistics stats;
 
+    if (args.filling_options.holes_only && !args.use_partitioned) {
+        if (args.verbosity > 0) {
+            std::cout << "Warning: --holes_only is supported only in partitioned mode; flag will be ignored.\n";
+        }
+        args.filling_options.holes_only = false;
+    }
+
     if (args.use_partitioned) {
         // Use partitioned parallel filling (default mode)
         if (args.verbosity > 0 && args.filling_options.verbose) {
             std::cout << "\n=== Partitioned Parallel Filling (Default) ===\n";
         }
 
-        ParallelHoleFillerPipeline partitioned_processor(mesh, thread_manager, args.filling_options);
+        ParallelPipelineCtx ctx;
+        ctx.mesh       = &mesh;
+        ctx.thread_mgr = &thread_manager;
+        ctx.options    = args.filling_options;
 
-        stats = partitioned_processor.process_partitioned(args.filling_options.verbose, debug);
+        stats = parallel_fill_partitioned(&ctx, args.filling_options.verbose, debug);
     } else {
         // Use legacy pipeline processing
         if (args.verbosity > 0 && args.filling_options.verbose) {
             std::cout << "\n=== Legacy Pipeline Mode ===\n";
         }
 
-        PipelineProcessor processor(mesh, thread_manager, args.filling_options);
+        PipelineContext ctx;
+        ctx.mesh       = &mesh;
+        ctx.thread_mgr = &thread_manager;
+        ctx.options    = args.filling_options;
 
-        if (thread_manager.get_total_threads() > 1) {
-            // Use pipeline processing for parallel execution
-            stats = processor.process_pipeline(args.filling_options.verbose);
+        if (thread_manager.config.num_threads > 1) {
+            stats = pipeline_process_pipeline(&ctx, args.filling_options.verbose);
         } else {
-            // Single-threaded batch processing
-            stats = processor.process_batch(args.filling_options.verbose);
+            stats = pipeline_process_batch(&ctx, args.filling_options.verbose);
         }
     }
 
@@ -322,8 +337,8 @@ cli_main(int argc, char** argv)
         }
 
         // Save anyway in case of format conversion
-        if (!MeshLoader::save(mesh, args.output_file)) {
-            std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
+        if (mesh_loader_save(mesh, args.output_file.c_str(), MeshLoader::Format::AUTO, true) != 0) {
+            std::cout << "Error: " << mesh_loader_last_error() << "\n";
             return 1;
         }
 
@@ -358,12 +373,12 @@ cli_main(int argc, char** argv)
 
     // Binary PLY by default, ASCII if requested
     auto save_start_time = std::chrono::high_resolution_clock::now();
-    bool use_binary_ply = !args.ascii_ply;
-    if (!MeshLoader::save(mesh, args.output_file, MeshLoader::Format::AUTO, use_binary_ply)) {
-        std::cout << "Error: " << MeshLoader::get_last_error() << "\n";
+    bool use_binary_ply  = !args.ascii_ply;
+    if (mesh_loader_save(mesh, args.output_file.c_str(), MeshLoader::Format::AUTO, use_binary_ply) != 0) {
+        std::cout << "Error: " << mesh_loader_last_error() << "\n";
         return 1;
     }
-    auto save_end_time = std::chrono::high_resolution_clock::now();
+    auto save_end_time  = std::chrono::high_resolution_clock::now();
     double save_time_ms = std::chrono::duration<double, std::milli>(save_end_time - save_start_time).count();
 
     // Step 6: Print detailed statistics if requested
@@ -374,8 +389,11 @@ cli_main(int argc, char** argv)
         std::cout << "  Faces: " << stats.original_faces << "\n";
 
         std::cout << "\nFinal mesh:\n";
-        std::cout << "  Vertices: " << stats.final_vertices << " (+" << stats.total_vertices_added() << ")\n";
-        std::cout << "  Faces: " << stats.final_faces << " (+" << stats.total_faces_added() << ")\n";
+        if (args.filling_options.holes_only) {
+            std::cout << "  [holes_only] Output contains only reconstructed faces (base mesh faces omitted)\n";
+        }
+        std::cout << "  Vertices: " << stats.final_vertices << " (+" << mesh_stats_total_vertices_added(stats) << ")\n";
+        std::cout << "  Faces: " << stats.final_faces << " (+" << mesh_stats_total_faces_added(stats) << ")\n";
 
         std::cout << "\nHole processing:\n";
         std::cout << "  Detected: " << stats.num_holes_detected << "\n";
@@ -396,7 +414,8 @@ cli_main(int argc, char** argv)
         std::cout << "  File save: " << save_time_ms << " ms\n";
 
         auto program_end_time = std::chrono::high_resolution_clock::now();
-        double total_program_time_ms = std::chrono::duration<double, std::milli>(program_end_time - program_start_time).count();
+        double total_program_time_ms
+            = std::chrono::duration<double, std::milli>(program_end_time - program_start_time).count();
         std::cout << "  Total program time: " << total_program_time_ms << " ms\n";
 
         if (args.filling_options.verbose && !stats.hole_details.empty()) {

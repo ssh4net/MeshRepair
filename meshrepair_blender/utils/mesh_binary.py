@@ -19,6 +19,8 @@ Format (all values little-endian):
 
 import struct
 import base64
+import array
+import sys
 
 
 def serialize_mesh_binary(mesh_data):
@@ -36,32 +38,22 @@ def serialize_mesh_binary(mesh_data):
     vertices = mesh_data['vertices']
     faces = mesh_data['faces']
 
-    # Calculate buffer size
-    # 4 bytes (vertex count) + 12 bytes per vertex + 4 bytes (face count) + 12 bytes per face
-    buffer_size = 4 + len(vertices) * 12 + 4 + len(faces) * 12
+    vertex_count = len(vertices)
+    face_count = len(faces)
 
-    # Create binary buffer
-    buffer = bytearray(buffer_size)
-    offset = 0
+    # Flatten using array for contiguous memory and less Python overhead
+    coords = array.array('f', (coord for v in vertices for coord in v))
+    indices = array.array('I', (idx for tri in faces for idx in tri))
 
-    # Write vertex count (uint32, little-endian)
-    struct.pack_into('<I', buffer, offset, len(vertices))
-    offset += 4
+    if sys.byteorder != 'little':
+        coords.byteswap()
+        indices.byteswap()
 
-    # Write vertices (float, float, float for each)
-    for vertex in vertices:
-        struct.pack_into('<fff', buffer, offset, vertex[0], vertex[1], vertex[2])
-        offset += 12
-
-    # Write face count (uint32, little-endian)
-    struct.pack_into('<I', buffer, offset, len(faces))
-    offset += 4
-
-    # Write faces (uint32, uint32, uint32 for each)
-    for face in faces:
-        struct.pack_into('<III', buffer, offset, face[0], face[1], face[2])
-        offset += 12
-
+    buffer = bytearray()
+    buffer.extend(struct.pack('<I', vertex_count))
+    buffer.extend(coords.tobytes())
+    buffer.extend(struct.pack('<I', face_count))
+    buffer.extend(indices.tobytes())
     return bytes(buffer)
 
 
@@ -78,49 +70,49 @@ def deserialize_mesh_binary(binary_data):
     Raises:
         ValueError: If binary data is invalid
     """
-    if len(binary_data) < 8:
+    mv = memoryview(binary_data)
+    if len(mv) < 8:
         raise ValueError("Binary mesh data too small")
 
     offset = 0
-
-    # Read vertex count
-    vertex_count = struct.unpack_from('<I', binary_data, offset)[0]
+    vertex_count = struct.unpack_from('<I', mv, offset)[0]
     offset += 4
 
-    # Validate size
-    expected_size = 4 + vertex_count * 12 + 4
-    if len(binary_data) < expected_size:
+    coord_count = vertex_count * 3
+    coord_bytes = coord_count * 4
+    if len(mv) < offset + coord_bytes + 4:
         raise ValueError("Binary mesh data truncated (vertices)")
 
-    # Read vertices
-    vertices = []
-    for i in range(vertex_count):
-        x, y, z = struct.unpack_from('<fff', binary_data, offset)
-        vertices.append([x, y, z])
-        offset += 12
+    coords = array.array('f')
+    coords.frombytes(mv[offset:offset + coord_bytes])
+    if sys.byteorder != 'little':
+        coords.byteswap()
+    offset += coord_bytes
 
-    # Read face count
-    if len(binary_data) < offset + 4:
-        raise ValueError("Binary mesh data truncated (face count)")
-
-    face_count = struct.unpack_from('<I', binary_data, offset)[0]
+    face_count = struct.unpack_from('<I', mv, offset)[0]
     offset += 4
 
-    # Validate size
-    if len(binary_data) < offset + face_count * 12:
+    index_count = face_count * 3
+    index_bytes = index_count * 4
+    if len(mv) < offset + index_bytes:
         raise ValueError("Binary mesh data truncated (faces)")
 
-    # Read faces
-    faces = []
-    for i in range(face_count):
-        i0, i1, i2 = struct.unpack_from('<III', binary_data, offset)
+    indices = array.array('I')
+    indices.frombytes(mv[offset:offset + index_bytes])
+    if sys.byteorder != 'little':
+        indices.byteswap()
 
-        # Validate indices
+    vertices = [
+        [coords[i], coords[i + 1], coords[i + 2]]
+        for i in range(0, coord_count, 3)
+    ]
+
+    faces = []
+    for i in range(0, index_count, 3):
+        i0, i1, i2 = indices[i], indices[i + 1], indices[i + 2]
         if i0 >= vertex_count or i1 >= vertex_count or i2 >= vertex_count:
             raise ValueError(f"Face index out of range: [{i0}, {i1}, {i2}]")
-
         faces.append([i0, i1, i2])
-        offset += 12
 
     return {'vertices': vertices, 'faces': faces}
 

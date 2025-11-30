@@ -28,7 +28,6 @@ class MESHREPAIR_PT_EngineStatus(MESHREPAIR_PT_Base):
     """Engine status panel"""
     bl_idname = 'MESHREPAIR_PT_EngineStatus'
     bl_label = 'Engine Status'
-    bl_order = 0
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw_header(self, context):
@@ -69,7 +68,6 @@ class MESHREPAIR_PT_Main(MESHREPAIR_PT_Base):
     """Main operations panel"""
     bl_idname = 'MESHREPAIR_PT_Main'
     bl_label = 'Main Operations'
-    bl_order = 1
 
     # REMOVED poll() method - panel now always visible!
 
@@ -111,9 +109,9 @@ class MESHREPAIR_PT_Main(MESHREPAIR_PT_Base):
             # Scope override
             row = box_col.row(align=True)
             row.prop(props, "mesh_scope", expand=True)
-            if props.mesh_scope == 'SELECTION':
+            if props.mesh_scope in {'SELECTION', 'REMESH'}:
                 row = box_col.row(align=True)
-                row.prop(props, "selection_dilation", text="Expand")
+                row.prop(props, "selection_dilation", text="Expand (0 = Auto)")
 
         elif obj.mode == 'OBJECT':
             # Object mode - show mesh info

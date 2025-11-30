@@ -33,7 +33,7 @@ namespace Engine {
         ~SocketStreambuf();
 
         // Prevent copying
-        SocketStreambuf(const SocketStreambuf&) = delete;
+        SocketStreambuf(const SocketStreambuf&)            = delete;
         SocketStreambuf& operator=(const SocketStreambuf&) = delete;
 
     protected:

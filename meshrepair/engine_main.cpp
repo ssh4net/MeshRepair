@@ -2,7 +2,7 @@
 
 #include "include/config.h"
 #include "include/debug_path.h"
-#include "engine/command_handler.h"
+#include "engine/engine_dispatch.h"
 #include "engine/socket_stream.h"
 #include "include/help_printer.h"
 #include <iostream>
@@ -22,7 +22,7 @@ engine_main(int argc, char** argv)
 {
     bool socket_mode = false;
     // Check for engine-specific options
-    int verbosity = 1;  // Default: info level (stats)
+    int verbosity   = 1;  // Default: info level (stats)
     int socket_port = 0;  // 0 = pipe mode, >0 = socket mode
     std::string temp_dir;
 
@@ -74,7 +74,6 @@ engine_main(int argc, char** argv)
     // 0 = quiet, 1 = info (stats), 2 = verbose, 3 = debug, 4 = trace (PLY dumps)
     bool show_stats = (verbosity >= 1);
     bool verbose    = (verbosity >= 2);
-    bool debug      = (verbosity >= 4);  // PLY file dumps only at level 4
 
     socket_mode = (socket_port > 0);
 
@@ -131,14 +130,38 @@ engine_main(int argc, char** argv)
                 SocketIStream input_stream(client_socket);
                 SocketOStream output_stream(client_socket);
 
-                // Create command handler (socket mode = true, pass verbose and stats flags)
-                CommandHandler handler(output_stream, verbose, show_stats, true);
+                EngineWrapper engine;
 
-                // Run message loop (blocks until client disconnects)
-                int exit_code = handler.run_message_loop(input_stream);
+                // Run message loop using procedural dispatcher
+                bool shutdown_requested = false;
+                while (!shutdown_requested) {
+                    MessageType msg_type;
+                    nlohmann::json cmd;
+                    try {
+                        cmd = read_message(input_stream, &msg_type);
+                    } catch (const std::exception& ex) {
+                        std::string error_msg = ex.what();
+                        if (error_msg.find("connection closed") != std::string::npos
+                            || error_msg.find("I/O error") != std::string::npos) {
+                            break;
+                        }
+                        throw;
+                    }
+
+                    if (msg_type != MessageType::COMMAND) {
+                        nlohmann::json error_resp = create_error_response("Expected COMMAND message type",
+                                                                          "protocol_error");
+                        write_message(output_stream, error_resp, MessageType::RESPONSE);
+                        continue;
+                    }
+
+                    nlohmann::json response = dispatch_command_procedural(engine, cmd, verbose, show_stats, true);
+                    write_message(output_stream, response, MessageType::RESPONSE);
+                    shutdown_requested = (cmd.value("command", "") == "shutdown");
+                }
 
                 if (verbose) {
-                    std::cerr << "Session ended (exit code: " << exit_code << ")\n\n";
+                    std::cerr << "Session ended\n\n";
                 }
 
                 // Close client socket
@@ -169,19 +192,19 @@ engine_main(int argc, char** argv)
 
     // Pipe mode (default)
     // Write startup messages to stderr AFTER binary mode is set
-    if (verbose && socket_mode) {
-        std::cerr << "MeshRepair v" << Config::VERSION << " - Engine Mode (Pipe)\n";
+    if (verbose) {
+        std::cerr << "MeshRepair v" << Config::VERSION << "\n";
+        std::cerr << "Built on " << Config::BUILD_DATE << " at " << Config::BUILD_TIME << "\n";
+        std::cerr << "Engine Mode (Pipe)\n\n";
         std::cerr << "Starting IPC engine...\n";
         std::cerr << "Protocol: Binary-framed JSON messages\n";
-        std::cerr << "Input: stdin (binary) | Output: stdout (binary) | Logs: stderr\n";
-        std::cerr << "\n";
+        std::cerr << "Input: stdin (binary) | Output: stdout (binary) | Logs: stderr\n\n";
         std::cerr << "Batch mode: Engine will process all commands from stdin until EOF.\n";
         std::cerr << "This pattern avoids Windows pipe EOF issues by sending all commands\n";
-        std::cerr << "upfront, closing stdin to signal end of input.\n";
-        std::cerr << "\n";
+        std::cerr << "upfront, closing stdin to signal end of input.\n\n";
         std::cerr.flush();  // Flush stderr before first stdout write
     }
-    if (show_stats && socket_mode) {
+    if (show_stats) {
         std::cerr << "Stats mode enabled\n";
         std::cerr.flush();  // Flush stderr before first stdout write
     }
@@ -196,17 +219,38 @@ engine_main(int argc, char** argv)
     // but keeping std::cin/cout for now to minimize changes
 
     try {
-        // Create command handler (pipe mode = false, pass verbose and stats flags)
-        CommandHandler handler(std::cout, verbose, show_stats, false);
-
-        // Run message loop
-        int exit_code = handler.run_message_loop(std::cin);
-
-        if (verbose && socket_mode) {
-            std::cerr << "Engine shutdown complete (exit code: " << exit_code << ")\n";
+        // Procedural command processing loop using dispatcher
+        if (verbose) {
+            std::cerr << "[Engine] Using procedural dispatcher\n";
         }
 
-        return exit_code;
+        EngineWrapper engine;
+        bool shutdown_requested = false;
+        while (!shutdown_requested) {
+            MessageType msg_type;
+            nlohmann::json cmd;
+            try {
+                cmd = read_message(std::cin, &msg_type);
+            } catch (const std::exception& ex) {
+                std::string error_msg = ex.what();
+                if (error_msg.find("connection closed") != std::string::npos
+                    || error_msg.find("I/O error") != std::string::npos) {
+                    break;  // graceful shutdown on EOF/close
+                }
+                throw;
+            }
+
+            if (msg_type != MessageType::COMMAND) {
+                nlohmann::json error_resp = create_error_response("Expected COMMAND message type", "protocol_error");
+                write_message(std::cout, error_resp, MessageType::RESPONSE);
+                continue;
+            }
+
+            nlohmann::json response = dispatch_command_procedural(engine, cmd, verbose, show_stats, false);
+            write_message(std::cout, response, MessageType::RESPONSE);
+            shutdown_requested = (cmd.value("command", "") == "shutdown");
+        }
+        return 0;
     } catch (const std::exception& ex) {
         if (socket_mode) {
             std::cerr << "FATAL ERROR in pipe mode: " << ex.what() << "\n";

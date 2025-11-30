@@ -40,17 +40,18 @@ class MeshRepairSceneProperties(PropertyGroup):
         name="Mesh Scope",
         description="Which part of mesh to process",
         items=[
+            ('REMESH', "Remesh", "Treat selected faces as a hole boundary and fill it"),
             ('SELECTION', "Selection", "Process selected elements only"),
             ('WHOLE', "Whole Mesh", "Process entire mesh ignoring selection"),
         ],
-        default='SELECTION'
+        default='REMESH'
     )
 
     selection_dilation: IntProperty(
-        name="Selection Expansion",
-        description="Number of times to expand edit-mode selection before export (-1 = auto)",
-        default=-1,
-        min=-1,
+        name="Selection Expansion (0 = Auto)",
+        description="Number of times to expand edit-mode selection before export (0 = auto)",
+        default=0,
+        min=0,
         max=8
     )
 
@@ -155,13 +156,13 @@ class MeshRepairSceneProperties(PropertyGroup):
         description="Maximum hole size to fill (vertices)",
         default=1000,
         min=3,
-        max=100000
+        max=1000000
     )
 
     filling_max_diameter_ratio: FloatProperty(
         name="Max Diameter Ratio",
         description="Maximum hole diameter relative to mesh bbox",
-        default=0.1,
+        default=0.25,
         min=0.0,
         max=1.0,
         precision=3

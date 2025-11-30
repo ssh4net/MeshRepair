@@ -7,10 +7,9 @@ namespace MeshRepair {
 namespace Engine {
 
     // Base64 encoding table
-    static const char base64_chars[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz"
-        "0123456789+/";
+    static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                       "abcdefghijklmnopqrstuvwxyz"
+                                       "0123456789+/";
 
     // Helper: Write uint32_t as little-endian
     static void write_uint32_le(std::vector<uint8_t>& buffer, uint32_t value)
@@ -24,8 +23,8 @@ namespace Engine {
     // Helper: Read uint32_t as little-endian
     static uint32_t read_uint32_le(const uint8_t* data)
     {
-        return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
-               (static_cast<uint32_t>(data[2]) << 16) | (static_cast<uint32_t>(data[3]) << 24);
+        return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8)
+               | (static_cast<uint32_t>(data[2]) << 16) | (static_cast<uint32_t>(data[3]) << 24);
     }
 
     // Helper: Write float as little-endian bytes
@@ -89,7 +88,7 @@ namespace Engine {
         return buffer;
     }
 
-    Mesh deserialize_mesh_binary(const std::vector<uint8_t>& data)
+    Mesh deserialize_mesh_binary(const std::vector<uint8_t>& data, uint32_t expected_vertices, uint32_t expected_faces)
     {
         if (data.size() < 8) {
             throw std::runtime_error("Binary mesh data too small");
@@ -102,16 +101,37 @@ namespace Engine {
         uint32_t vertex_count = read_uint32_le(ptr + offset);
         offset += 4;
 
-        if (data.size() < offset + vertex_count * 12 + 4) {
+        if (expected_vertices > 0 && vertex_count != expected_vertices) {
+            throw std::runtime_error("Binary mesh vertex count mismatch");
+        }
+
+        const size_t vertices_block_size = static_cast<size_t>(vertex_count) * 12;
+        const size_t face_count_offset   = offset + vertices_block_size;
+
+        if (data.size() < face_count_offset + 4) {
             throw std::runtime_error("Binary mesh data truncated (vertices)");
         }
 
-        // Create mesh
+        uint32_t face_count = read_uint32_le(ptr + face_count_offset);
+
+        if (expected_faces > 0 && face_count != expected_faces) {
+            throw std::runtime_error("Binary mesh face count mismatch");
+        }
+
+        const size_t faces_block_size = static_cast<size_t>(face_count) * 12;
+        const size_t expected_size    = 4 + vertices_block_size + 4 + faces_block_size;
+        if (data.size() < expected_size) {
+            throw std::runtime_error("Binary mesh data truncated (expected size)");
+        }
+
+        // Create mesh after both counts are known
         Mesh mesh;
+        mesh.reserve(vertex_count, face_count * 3, face_count);
         std::vector<Mesh::Vertex_index> vertex_indices;
         vertex_indices.reserve(vertex_count);
 
-        // Read vertices
+        // Deserialize vertices
+        offset = 4;
         for (uint32_t i = 0; i < vertex_count; ++i) {
             float x = read_float_le(ptr + offset);
             offset += 4;
@@ -124,17 +144,8 @@ namespace Engine {
             vertex_indices.push_back(mesh.add_vertex(p));
         }
 
-        // Read face count
-        if (data.size() < offset + 4) {
-            throw std::runtime_error("Binary mesh data truncated (face count)");
-        }
-
-        uint32_t face_count = read_uint32_le(ptr + offset);
-        offset += 4;
-
-        if (data.size() < offset + face_count * 12) {
-            throw std::runtime_error("Binary mesh data truncated (faces)");
-        }
+        // Move offset to faces block start (skip stored face_count)
+        offset = face_count_offset + 4;
 
         // Read faces
         for (uint32_t i = 0; i < face_count; ++i) {
@@ -149,12 +160,89 @@ namespace Engine {
                 throw std::runtime_error("Binary mesh face index out of range");
             }
 
-            std::vector<Mesh::Vertex_index> face_verts = { vertex_indices[i0], vertex_indices[i1],
-                                                            vertex_indices[i2] };
+            std::vector<Mesh::Vertex_index> face_verts = { vertex_indices[i0], vertex_indices[i1], vertex_indices[i2] };
             mesh.add_face(face_verts);
         }
 
         return mesh;
+    }
+
+    PolygonSoup deserialize_mesh_binary_to_soup(const std::vector<uint8_t>& data, uint32_t expected_vertices,
+                                                uint32_t expected_faces)
+    {
+        if (data.size() < 8) {
+            throw std::runtime_error("Binary mesh data too small");
+        }
+
+        const uint8_t* ptr = data.data();
+        size_t offset      = 0;
+
+        // Read vertex count
+        uint32_t vertex_count = read_uint32_le(ptr + offset);
+        offset += 4;
+
+        if (expected_vertices > 0 && vertex_count != expected_vertices) {
+            throw std::runtime_error("Binary mesh vertex count mismatch");
+        }
+
+        const size_t vertices_block_size = static_cast<size_t>(vertex_count) * 12;
+        const size_t face_count_offset   = offset + vertices_block_size;
+
+        if (data.size() < face_count_offset + 4) {
+            throw std::runtime_error("Binary mesh data truncated (vertices)");
+        }
+
+        uint32_t face_count = read_uint32_le(ptr + face_count_offset);
+
+        if (expected_faces > 0 && face_count != expected_faces) {
+            throw std::runtime_error("Binary mesh face count mismatch");
+        }
+
+        const size_t faces_block_size = static_cast<size_t>(face_count) * 12;
+        const size_t expected_size    = 4 + vertices_block_size + 4 + faces_block_size;
+        if (data.size() < expected_size) {
+            throw std::runtime_error("Binary mesh data truncated (expected size)");
+        }
+
+        PolygonSoup soup;
+        soup.points.reserve(vertex_count);
+        soup.polygons.reserve(face_count);
+
+        // Deserialize vertices
+        offset = 4;
+        for (uint32_t i = 0; i < vertex_count; ++i) {
+            float x = read_float_le(ptr + offset);
+            offset += 4;
+            float y = read_float_le(ptr + offset);
+            offset += 4;
+            float z = read_float_le(ptr + offset);
+            offset += 4;
+
+            soup.points.emplace_back(static_cast<double>(x), static_cast<double>(y), static_cast<double>(z));
+        }
+
+        // Move offset to faces block start (skip stored face_count)
+        offset = face_count_offset + 4;
+
+        // Read faces
+        for (uint32_t i = 0; i < face_count; ++i) {
+            uint32_t i0 = read_uint32_le(ptr + offset);
+            offset += 4;
+            uint32_t i1 = read_uint32_le(ptr + offset);
+            offset += 4;
+            uint32_t i2 = read_uint32_le(ptr + offset);
+            offset += 4;
+
+            if (i0 >= vertex_count || i1 >= vertex_count || i2 >= vertex_count) {
+                throw std::runtime_error("Binary mesh face index out of range");
+            }
+
+            soup.polygons.push_back(
+                { static_cast<std::size_t>(i0), static_cast<std::size_t>(i1), static_cast<std::size_t>(i2) });
+        }
+
+        soup.load_time_ms = 0.0;
+        return soup;
     }
 
     std::string base64_encode(const std::vector<uint8_t>& data)
@@ -162,8 +250,8 @@ namespace Engine {
         std::string encoded;
         encoded.reserve(((data.size() + 2) / 3) * 4);
 
-        int val   = 0;
-        int valb  = -6;
+        int val  = 0;
+        int valb = -6;
         for (uint8_t c : data) {
             val = (val << 8) + c;
             valb += 8;

@@ -21,9 +21,9 @@ struct PreprocessingStats {
     double total_time_ms                 = 0.0;
 
     // Detailed timing breakdown
-    double soup_cleanup_time_ms     = 0.0;  // Time in soup space (duplicates, non-manifold, etc.)
-    double soup_to_mesh_time_ms     = 0.0;  // Time converting soup to mesh
-    double mesh_cleanup_time_ms     = 0.0;  // Time in mesh space (isolated vertices, components)
+    double soup_cleanup_time_ms = 0.0;  // Time in soup space (duplicates, non-manifold, etc.)
+    double soup_to_mesh_time_ms = 0.0;  // Time converting soup to mesh
+    double mesh_cleanup_time_ms = 0.0;  // Time in mesh space (isolated vertices, components)
 
     bool has_changes() const
     {
@@ -77,6 +77,13 @@ private:
     PreprocessingStats stats_;
     ThreadPool* thread_pool_ = nullptr;  // Optional thread pool
 };
+
+// C-style helpers (status + out params, 0 on success)
+int
+preprocess_mesh_c(Mesh* mesh, const PreprocessingOptions* options, PreprocessingStats* out_stats);
+int
+preprocess_soup_c(PolygonSoup* soup, Mesh* out_mesh, const PreprocessingOptions* options,
+                  PreprocessingStats* out_stats);
 
 }  // namespace MeshRepair
 

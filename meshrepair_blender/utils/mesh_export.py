@@ -16,8 +16,8 @@ Exports directly to data structures (no temp files).
 
 import bpy
 import bmesh
-from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from typing import List, Set, Tuple
 
 
 @dataclass
@@ -26,13 +26,60 @@ class MeshExportResult:
     mesh_data: dict
     selection_only: bool
     selection_was_empty: bool
+    selection_hole_count: int
     vertex_orig_indices: List[int]
-    boundary_vertex_flags: List[bool]
+    boundary_vertex_flags: List[bool]  # Rim boundary flags (hole rim for Selection, user rim for Remesh)
+    engine_boundary_indices: List[int]  # Guard boundary indices (expanded selection border)
     face_orig_indices: List[int]
     object_bbox_diagonal: float = 0.0  # Bounding box diagonal of the FULL object (not selection)
+    faces_to_delete: List[int] = field(default_factory=list)  # Original faces to remove before importing result
+    remesh_selection: bool = False  # Whether selection was treated as a hole boundary
 
 
-def export_mesh_to_data(obj, selection_only=False, dilation_iters=0):
+def _export_mesh_full_fast(obj):
+    """Fast object-mode export using Mesh loop triangles and foreach_get."""
+    mesh = obj.data.copy()
+    try:
+        mesh.calc_loop_triangles()
+
+        vertex_count = len(mesh.vertices)
+        tri_count = len(mesh.loop_triangles)
+
+        coords = [0.0] * (vertex_count * 3)
+        mesh.vertices.foreach_get("co", coords)
+
+        tri_flat = [0] * (tri_count * 3)
+        mesh.loop_triangles.foreach_get("vertices", tri_flat)
+
+        vertices = [coords[i:i + 3] for i in range(0, len(coords), 3)]
+        faces = [tri_flat[i:i + 3] for i in range(0, len(tri_flat), 3)]
+
+        object_bbox_diagonal = _compute_object_bbox_diagonal(obj)
+
+        return MeshExportResult(
+            mesh_data={
+                'vertices': vertices,
+                'faces': faces
+            },
+            selection_only=False,
+            selection_was_empty=False,
+            selection_hole_count=0,
+            vertex_orig_indices=list(range(vertex_count)),
+            boundary_vertex_flags=[False] * vertex_count,
+            engine_boundary_indices=[],
+            face_orig_indices=list(range(tri_count)),
+            object_bbox_diagonal=object_bbox_diagonal,
+            faces_to_delete=[],
+            remesh_selection=False
+        )
+    finally:
+        try:
+            bpy.data.meshes.remove(mesh)
+        except Exception:
+            pass
+
+
+def export_mesh_to_data(obj, selection_only=False, dilation_iters=0, remesh_selection=False):
     """
     Export Blender mesh (or selection patch) to mesh soup data.
 
@@ -40,6 +87,7 @@ def export_mesh_to_data(obj, selection_only=False, dilation_iters=0):
         obj: Blender object (must be MESH type)
         selection_only: Limit export to active selection (edit mode)
         dilation_iters: Selection dilation iterations (>=0, ignored if not selection_only)
+        remesh_selection: Treat the selection as a hole boundary (selected faces removed, dilated ring exported)
 
     Returns:
         MeshExportResult: Mesh soup data plus mapping metadata
@@ -50,8 +98,22 @@ def export_mesh_to_data(obj, selection_only=False, dilation_iters=0):
     if obj.type != 'MESH':
         raise RuntimeError("Object must be MESH type")
 
+    # Fast path for full-mesh/object-mode export: use Mesh foreach_get/loop_triangles.
+    if obj.mode != 'EDIT' and not selection_only:
+        return _export_mesh_full_fast(obj)
+
+    bm = None
+    bm_freed = False
+
     try:
         mesh = obj.data
+        select_mode = None
+        if obj.mode == 'EDIT':
+            # Keep track of the active select mode so vertex-only selections can be mapped to faces.
+            try:
+                select_mode = tuple(bpy.context.tool_settings.mesh_select_mode)
+            except Exception:
+                select_mode = None
         
         if obj.mode == 'EDIT':
             bm_edit = bmesh.from_edit_mesh(mesh)
@@ -131,37 +193,123 @@ def export_mesh_to_data(obj, selection_only=False, dilation_iters=0):
                 else:
                     bm_face[face_layer] = bm_face.index
 
-        edit_selection = _collect_edit_mode_selection(obj) if obj.mode == 'EDIT' else None
-        scoped_face_indices, selection_was_empty = _resolve_face_scope(
+        base_selection = _collect_edit_mode_selection(obj) if obj.mode == 'EDIT' else None
+        edit_selection = base_selection
+        dilation_iters = max(0, int(dilation_iters))
+        if remesh_selection and selection_only:
+            dilation_iters = max(1, dilation_iters)
+        if selection_only and dilation_iters <= 0:
+            dilation_iters = 1  # Always at least one polygon ring in selection modes
+
+        # Expand selection using Blender's face-step select_more; treat expansion as the scoped patch,
+        # but keep the base selection separately so we can delete only those faces in Remesh.
+        expanded = None
+        if selection_only and obj.mode == 'EDIT':
+            expanded = _expand_edit_selection_face_step(obj, dilation_iters)
+            if expanded and expanded[0]:
+                edit_selection = expanded
+                dilation_iters = 0
+
+        scoped_face_indices, selection_was_empty, selected_face_indices = _resolve_face_scope(
             bm,
             selection_only and obj.mode == 'EDIT',
-            max(0, int(dilation_iters)),
+            dilation_iters,
             edit_selection,
-            face_layer
+            face_layer,
+            select_mode
         )
 
-        boundary_vertex_indices = _compute_boundary_vertices(
-            bm,
-            scoped_face_indices,
-            vert_layer,
-            face_layer
-        ) if scoped_face_indices else set()
-        face_orig_indices = list(scoped_face_indices)
+        if selection_was_empty:
+            remesh_selection = False
 
-        if scoped_face_indices:
-            _isolate_faces(bm, scoped_face_indices, face_layer)
+        faces_to_delete = set()
+        export_face_indices = set(scoped_face_indices)
+        selection_hole_count = 0
+
+        if selection_only and not selection_was_empty:
+            if remesh_selection:
+                base_selected_faces = set(base_selection[0]) if base_selection else set()
+                faces_to_delete = base_selected_faces if base_selected_faces else set(selected_face_indices)
+                # For remesh we export only the expanded patch (selection scope).
+                export_face_indices = set(scoped_face_indices)
+            else:
+                # Selection mode: keep original faces in Blender, just measure holes
+                faces_to_delete = set()
+                selection_hole_count = _count_scoped_holes(bm, export_face_indices, face_layer)
+
+        # Avoid empty exports when remeshing covers the whole scoped region
+        if remesh_selection and selection_only and not export_face_indices and scoped_face_indices:
+            export_face_indices = set(scoped_face_indices)
+            faces_to_delete = set(export_face_indices)
+            remesh_selection = False
+
+        # Guard: selection border (expanded). Used only by the engine to avoid filling across selection edge.
+        guard_face_indices = set(expanded[0]) if expanded and expanded[0] else export_face_indices
+        topology_boundary_vertices = _compute_topology_boundary_vertices(bm, vert_layer)
+        guard_vertex_indices = _compute_boundary_vertices(
+            bm,
+            guard_face_indices,
+            vert_layer,
+            face_layer,
+            ignored_faces=faces_to_delete if remesh_selection else None
+        ) if guard_face_indices else set()
+        guard_vertex_indices = guard_vertex_indices - topology_boundary_vertices
+
+        # Rim: actual hole border to be stitched on import.
+        rim_vertex_indices: Set[int] = set()
+        if selection_only and not selection_was_empty:
+            if remesh_selection and faces_to_delete:
+                rim_vertex_indices = _compute_face_set_boundary_vertices(
+                    bm,
+                    faces_to_delete,
+                    face_layer,
+                    vert_layer
+                )
+            elif not remesh_selection:
+                rim_vertex_indices = _compute_hole_boundary_vertices(
+                    bm,
+                    export_face_indices,
+                    face_layer,
+                    vert_layer
+                )
+
+        engine_boundary_indices = guard_vertex_indices
+        face_orig_indices = list(export_face_indices)
+        faces_to_delete_list = list(faces_to_delete) if faces_to_delete else []
+        engine_boundary_indices_list = []
+
+        if faces_to_delete and remesh_selection:
+            faces_to_delete_geom = [face for face in bm.faces if face[face_layer] in faces_to_delete]
+            if faces_to_delete_geom:
+                bmesh.ops.delete(bm, geom=faces_to_delete_geom, context='FACES')
+                bm.faces.ensure_lookup_table()
+                bm.verts.ensure_lookup_table()
+
+        if export_face_indices:
+            _isolate_faces(bm, export_face_indices, face_layer)
+            _remove_isolated_vertices(bm)
 
         _triangulate_all(bm)
 
         mesh_data, vertex_orig_indices, boundary_flags = _serialize_bmesh(
             bm,
-            boundary_vertex_indices,
+            rim_vertex_indices,
             vert_layer
         )
 
-        bm.free()
+        # Map guard boundary (selection border) to exported vertex indices expected by the engine
+        if engine_boundary_indices:
+            guard_lookup = set(engine_boundary_indices)
+            engine_boundary_indices_list = [
+                idx for idx, orig in enumerate(vertex_orig_indices) if orig in guard_lookup
+            ]
 
+        bm.free()
+        bm_freed = True
+
+        # In remesh mode we export the full mesh (with selected faces removed), so import should replace.
         actual_selection = bool(selection_only and obj.mode == 'EDIT' and not selection_was_empty)
+        remesh_flag = bool(remesh_selection and not selection_was_empty)
 
         # Calculate object bounding box diagonal (for proper hole size ratio in selection mode)
         object_bbox_diagonal = _compute_object_bbox_diagonal(obj)
@@ -170,66 +318,112 @@ def export_mesh_to_data(obj, selection_only=False, dilation_iters=0):
             mesh_data=mesh_data,
             selection_only=actual_selection,
             selection_was_empty=selection_was_empty,
+            selection_hole_count=selection_hole_count,
             vertex_orig_indices=vertex_orig_indices,
             boundary_vertex_flags=boundary_flags,
+            engine_boundary_indices=engine_boundary_indices_list,
             face_orig_indices=face_orig_indices,
-            object_bbox_diagonal=object_bbox_diagonal
+            object_bbox_diagonal=object_bbox_diagonal,
+            faces_to_delete=faces_to_delete_list,
+            remesh_selection=remesh_flag
         )
 
     except Exception as ex:
         raise RuntimeError(f"Failed to export mesh: {ex}")
+    finally:
+        if bm is not None and not bm_freed:
+            try:
+                bm.free()
+            except Exception:
+                pass
 
 
 def _collect_edit_mode_selection(obj):
     """Capture edit-mode selections as index sets."""
     bm = bmesh.from_edit_mesh(obj.data)
     faces = {face.index for face in bm.faces if face.select}
-    edges = {edge.index for edge in bm.edges if edge.select}
-    verts = {vert.index for vert in bm.verts if vert.select}
+    edges = set()
+    verts = set()
     return faces, edges, verts
 
 
-def _resolve_face_scope(bm, selection_only, dilation_iters, edit_selection, face_layer):
+def _expand_edit_selection_face_step(obj, iterations):
+    """Expand the current edit-mode selection using Blender's face-step select_more (API-compatible)."""
+    if not obj or obj.mode != 'EDIT' or iterations <= 0:
+        return None
+
+    for _ in range(iterations):
+        try:
+            bpy.ops.mesh.select_more(use_face_step=True)
+        except Exception:
+            return None
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    bm.verts.ensure_lookup_table()
+
+    selected_faces = {face.index for face in bm.faces if face.select}
+    selected_edges = {edge.index for edge in bm.edges if edge.select}
+    selected_verts = {vert.index for vert in bm.verts if vert.select}
+
+    # After expanding, rely only on face selection for exporting.
+    if not selected_faces:
+        return None
+
+    return (
+        selected_faces,
+        selected_edges,
+        selected_verts
+    )
+
+
+def _safe_update_edit_mesh(mesh):
+    """Call bmesh.update_edit_mesh with version-safe signature."""
+    try:
+        bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+    except TypeError:
+        try:
+            bmesh.update_edit_mesh(mesh, tessface=False, destructive=False)
+        except TypeError:
+            bmesh.update_edit_mesh(mesh)
+
+
+def _resolve_face_scope(bm, selection_only, dilation_iters, edit_selection, face_layer, select_mode=None):
     """
     Determine which faces to export.
 
     Returns:
-        Tuple[Set[int], bool]: (face indices, selection_was_empty)
+        Tuple[Set[int], bool, Set[int]]: (face indices, selection_was_empty, directly selected faces)
     """
     scoped_indices: Set[int]
+    selected_indices: Set[int] = set()
     selection_was_empty = False
 
     if not selection_only or edit_selection is None:
         scoped_indices = {face[face_layer] for face in bm.faces}
-        return scoped_indices, selection_was_empty
+        return scoped_indices, selection_was_empty, selected_indices
 
-    selected_faces, selected_edges, selected_verts = edit_selection
-
-    scoped_indices = set(selected_faces)
-    if not scoped_indices and selected_edges:
-        scoped_indices = {
-            face[face_layer] for face in bm.faces
-            if any(edge.index in selected_edges for edge in face.edges)
-        }
-    if not scoped_indices and selected_verts:
-        scoped_indices = {
-            face[face_layer] for face in bm.faces
-            if any(vert.index in selected_verts for vert in face.verts)
-        }
-
-    if not scoped_indices:
-        selection_was_empty = True
-        scoped_indices = {face[face_layer] for face in bm.faces}
-        return scoped_indices, selection_was_empty
+    selected_faces, _, _ = edit_selection
 
     face_lookup = {face[face_layer]: face for face in bm.faces}
-    scoped_face_objs = {face_lookup[idx] for idx in scoped_indices if idx in face_lookup}
+
+    selected_indices = set(selected_faces)
+
+    if not selected_indices:
+        selection_was_empty = True
+        scoped_indices = {face[face_layer] for face in bm.faces}
+        return scoped_indices, selection_was_empty, set()
+
+    selected_face_objs = {face_lookup[idx] for idx in selected_indices if idx in face_lookup}
+    scoped_face_objs = set(selected_face_objs)
 
     if dilation_iters > 0:
         scoped_face_objs = _dilate_face_set(scoped_face_objs, dilation_iters)
 
     scoped_indices = {face[face_layer] for face in scoped_face_objs}
-    return scoped_indices, selection_was_empty
+    selected_indices = {face[face_layer] for face in selected_face_objs}
+    return scoped_indices, selection_was_empty, selected_indices
 
 
 def _dilate_face_set(initial_faces, dilation_iters):
@@ -267,22 +461,80 @@ def _compute_object_bbox_diagonal(obj):
     return 0.0
 
 
-def _compute_boundary_vertices(bm, scoped_face_indices, vert_layer, face_layer):
-    """Return original vertex indices that lie on the selection boundary."""
+def _compute_boundary_vertices(bm, scoped_face_indices, vert_layer, face_layer, ignored_faces=None):
+    """Return original vertex indices that lie on the selection boundary (faces in vs out of scope)."""
     scoped = set(scoped_face_indices)
+    ignored = set(ignored_faces) if ignored_faces else set()
     boundary = set()
-    for vert in bm.verts:
+    for edge in bm.edges:
+        linked = edge.link_faces
+        if len(linked) < 1:
+            continue
         in_scope = False
-        out_of_scope = False
-        for face in vert.link_faces:
-            face_idx = face[face_layer]
-            if face_idx in scoped:
+        out_scope = False
+        for face in linked:
+            f_idx = face[face_layer]
+            if f_idx in ignored:
+                continue
+            if f_idx in scoped:
                 in_scope = True
             else:
-                out_of_scope = True
-            if in_scope and out_of_scope:
+                out_scope = True
+        if in_scope and out_scope:
+            for vert in edge.verts:
                 boundary.add(vert[vert_layer])
-                break
+    return boundary
+
+
+def _compute_hole_boundary_vertices(bm, scoped_face_indices, face_layer, vert_layer):
+    """
+    Return original vertex indices on real hole borders within the scoped faces (edges with a single in-scope face).
+    """
+    scoped = set(scoped_face_indices)
+    boundary_edges = []
+    for edge in bm.edges:
+        linked_in_scope = [face for face in edge.link_faces if face[face_layer] in scoped]
+        if len(edge.link_faces) == 1 and len(linked_in_scope) == 1:
+            boundary_edges.append(edge)
+
+    boundary = set()
+    for edge in boundary_edges:
+        for vert in edge.verts:
+            boundary.add(vert[vert_layer])
+    return boundary
+
+
+def _compute_face_set_boundary_vertices(bm, face_indices, face_layer, vert_layer):
+    """
+    Return original vertex indices on the boundary of a face set (adjacent to non-set faces or open edges).
+    Used to capture the user-selected rim before expansion/deletion in remesh mode.
+    """
+    face_ids = set(face_indices)
+    boundary = set()
+    for edge in bm.edges:
+        linked = edge.link_faces
+        if not linked:
+            continue
+        in_count = 0
+        for face in linked:
+            if face[face_layer] in face_ids:
+                in_count += 1
+        if in_count == 0:
+            continue
+        out_count = len(linked) - in_count
+        if out_count > 0 or len(linked) < 2:
+            for vert in edge.verts:
+                boundary.add(vert[vert_layer])
+    return boundary
+
+
+def _compute_topology_boundary_vertices(bm, vert_layer):
+    """Return original vertex indices that lie on true mesh boundaries (missing adjacent faces)."""
+    boundary = set()
+    for edge in bm.edges:
+        if len(edge.link_faces) < 2:
+            for vert in edge.verts:
+                boundary.add(vert[vert_layer])
     return boundary
 
 
@@ -295,12 +547,59 @@ def _isolate_faces(bm, scoped_face_indices, face_layer):
         bm.verts.ensure_lookup_table()
 
 
+def _remove_isolated_vertices(bm):
+    """Remove vertices that are no longer referenced by any face."""
+    unused = [vert for vert in bm.verts if not vert.link_faces]
+    if unused:
+        bmesh.ops.delete(bm, geom=unused, context='VERTS')
+        bm.verts.ensure_lookup_table()
+
+
 def _triangulate_all(bm):
     """Triangulate all faces in-place."""
     if bm.faces:
         bmesh.ops.triangulate(bm, faces=bm.faces[:])
         bm.faces.ensure_lookup_table()
         bm.verts.ensure_lookup_table()
+
+
+def _count_scoped_holes(bm, scoped_face_indices, face_layer):
+    """
+    Count boundary edge loops that belong to the scoped faces (real holes inside the selection).
+    Edges shared with out-of-scope faces are ignored so selection borders are not treated as holes.
+    """
+    scoped = set(scoped_face_indices)
+    boundary_edges = []
+    for edge in bm.edges:
+        linked_in_scope = [face for face in edge.link_faces if face[face_layer] in scoped]
+        if len(edge.link_faces) == 1 and len(linked_in_scope) == 1:
+            boundary_edges.append(edge)
+
+    if not boundary_edges:
+        return 0
+
+    vert_to_edges = {}
+    for edge in boundary_edges:
+        for vert in edge.verts:
+            vert_to_edges.setdefault(vert, set()).add(edge)
+
+    visited = set()
+    loops = 0
+    for edge in boundary_edges:
+        if edge in visited:
+            continue
+        loops += 1
+        stack = [edge]
+        while stack:
+            e = stack.pop()
+            if e in visited:
+                continue
+            visited.add(e)
+            for vert in e.verts:
+                for neighbor in vert_to_edges.get(vert, []):
+                    if neighbor not in visited:
+                        stack.append(neighbor)
+    return loops
 
 
 def _serialize_bmesh(bm, boundary_vertex_indices, vert_layer):

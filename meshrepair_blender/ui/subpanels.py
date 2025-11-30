@@ -27,6 +27,7 @@ class MESHREPAIR_PT_Preprocessing(MESHREPAIR_PT_SubPanel):
     """Preprocessing options panel"""
     bl_idname = 'MESHREPAIR_PT_Preprocessing'
     bl_label = 'Preprocessing Options'
+    bl_options = set()
 
     def draw_header(self, context):
         props = context.scene.meshrepair_props
@@ -73,6 +74,7 @@ class MESHREPAIR_PT_Filling(MESHREPAIR_PT_SubPanel):
     """Hole filling options panel"""
     bl_idname = 'MESHREPAIR_PT_Filling'
     bl_label = 'Hole Filling Options'
+    bl_options = set()
 
     def draw(self, context):
         layout = self.layout
@@ -115,7 +117,7 @@ class MESHREPAIR_PT_Results(MESHREPAIR_PT_SubPanel):
     """Results and statistics panel"""
     bl_idname = 'MESHREPAIR_PT_Results'
     bl_label = 'Results & Statistics'
-    bl_parent_id = 'MESHREPAIR_PT_EngineStatus'
+    bl_parent_id = ''
 
     @classmethod
     def poll(cls, context):

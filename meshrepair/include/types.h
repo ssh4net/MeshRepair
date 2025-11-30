@@ -53,25 +53,26 @@ struct MeshStatistics {
 
     // Detailed per-hole statistics
     std::vector<HoleStatistics> hole_details;
-
-    // Summary methods
-    size_t total_faces_added() const
-    {
-        size_t total = 0;
-        for (const auto& h : hole_details) {
-            total += h.num_faces_added;
-        }
-        return total;
-    }
-
-    size_t total_vertices_added() const
-    {
-        size_t total = 0;
-        for (const auto& h : hole_details) {
-            total += h.num_vertices_added;
-        }
-        return total;
-    }
 };
+
+inline size_t
+mesh_stats_total_faces_added(const MeshStatistics& stats)
+{
+    size_t total = 0;
+    for (const auto& h : stats.hole_details) {
+        total += h.num_faces_added;
+    }
+    return total;
+}
+
+inline size_t
+mesh_stats_total_vertices_added(const MeshStatistics& stats)
+{
+    size_t total = 0;
+    for (const auto& h : stats.hole_details) {
+        total += h.num_vertices_added;
+    }
+    return total;
+}
 
 }  // namespace MeshRepair

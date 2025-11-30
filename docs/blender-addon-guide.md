@@ -19,7 +19,7 @@ MeshRepair for Blender integrates the MeshRepair engine directly into Blender's 
 - [Preprocessing Options](#preprocessing-options)
 - [Hole Filling Options](#hole-filling-options)
 - [Results and Statistics](#results-and-statistics)
-- [Configuration Guidelines](#configuration-guidelines)
+- [General Guidelines](#general-guidelines)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -197,8 +197,15 @@ In Edit Mode, the **Scope** option controls processing extent:
 
 | Option | Behavior |
 |--------|----------|
-| **Selection** | Process selected faces and detected holes within |
+| **Remesh** | Treat selected faces as a hole rim, delete them, and fill the opening |
+| **Selection** | Keep selected faces, fill holes found inside the selection |
 | **Whole Mesh** | Process entire mesh regardless of selection |
+
+**Remesh**:
+![Remesh](https://ssh4net.github.io/MeshRepair/images/remesh_selection.gif)
+
+**Selection**:
+![Selection](https://ssh4net.github.io/MeshRepair/images/selection.gif)
 
 ### Selection Workflow
 
@@ -208,17 +215,17 @@ In Edit Mode, the **Scope** option controls processing extent:
 4. Include adequate surrounding geometry for blending
 5. Execute repair operation
 
+
 ### Selection Expansion
 
-The addon automatically expands selection to include neighboring geometry for smooth blending. Control this behavior with the expansion parameter:
+The addon automatically expands selection to include neighboring geometry for smooth blending. Control this with **Expand (0 = Auto)**:
 
 | Value | Behavior |
 |-------|----------|
-| **-1 (Auto)** | Calculated based on continuity level |
-| **0** | No expansion (exact selection) |
+| **0 (Auto)** | Automatically chooses expansion based on continuity (at least 1 ring, 2 rings for C²) |
 | **1-8** | Manual expansion iterations |
 
-Higher values provide smoother blending at increased computation cost.
+Default is auto. Higher values provide smoother blending at increased computation cost.
 
 ### Selection Boundary Handling
 
@@ -232,7 +239,7 @@ Selection boundaries are automatically excluded from hole filling.
 
 ## Preprocessing Options
 
-Expand the Preprocessing panel to access cleanup settings:
+The Preprocessing panel is open by default; use it to access cleanup settings:
 
 ### Presets
 
@@ -262,7 +269,7 @@ Expand the Preprocessing panel to access cleanup settings:
 
 ## Hole Filling Options
 
-Expand the Hole Filling panel to access algorithm parameters:
+The Hole Filling panel is open by default; use it to access algorithm parameters:
 
 ### Size Limits
 
@@ -304,7 +311,7 @@ Default values are suitable for most cases.
 
 ## Results and Statistics
 
-After operations, the **Results** panel displays statistics:
+After operations, the **Results & Statistics** panel (between Engine Status and Main Operations) displays statistics:
 
 ### Summary
 
@@ -335,31 +342,6 @@ After operations, the **Results** panel displays statistics:
 | **Faces Added** | New triangles created |
 
 ---
-
-## Configuration Guidelines
-
-### 3D Scans
-
-Recommended settings:
-1. Enable preprocessing with all options
-2. Enable "Keep Largest Only" to remove debris
-3. Use C² continuity for smooth fills
-4. Increase Max Diameter for large occlusion gaps
-
-### Game Assets
-
-Recommended settings:
-1. Use C¹ continuity (balance of quality and performance)
-2. Monitor triangle count (refinement adds geometry)
-3. Use Edit Mode for targeted repairs
-
-### Additive Manufacturing
-
-Recommended settings:
-1. Use C² continuity for smooth surfaces
-2. Enable mesh refinement
-3. Run preprocessing to ensure manifold output
-4. Verify result with Blender's Mesh Analysis
 
 ### General Guidelines
 

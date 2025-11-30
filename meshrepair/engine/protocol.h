@@ -23,11 +23,11 @@ namespace Engine {
     };
 
     // Protocol constants
-    constexpr uint16_t PROTOCOL_MAGIC      = 0xABCD;
-    constexpr size_t   MAGIC_SIZE_BYTES    = sizeof(uint16_t);
-    constexpr size_t   HEADER_SIZE_BYTES   = 5;                  // 4 (length) + 1 (type)
-    constexpr size_t   FRAME_SIZE_BYTES    = MAGIC_SIZE_BYTES + HEADER_SIZE_BYTES;
-    constexpr uint32_t MAX_MESSAGE_SIZE    = 100 * 1024 * 1024;  // 100 MB max
+    constexpr uint16_t PROTOCOL_MAGIC   = 0xABCD;
+    constexpr size_t MAGIC_SIZE_BYTES   = sizeof(uint16_t);
+    constexpr size_t HEADER_SIZE_BYTES  = 5;  // 4 (length) + 1 (type)
+    constexpr size_t FRAME_SIZE_BYTES   = MAGIC_SIZE_BYTES + HEADER_SIZE_BYTES;
+    constexpr uint32_t MAX_MESSAGE_SIZE = 100 * 1024 * 1024;  // 100 MB max
 
     // Read a complete message from stream
     // Returns: parsed JSON object

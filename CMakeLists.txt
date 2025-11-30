@@ -217,53 +217,45 @@ set(MESHREPAIR_SOURCES
     meshrepair/main.cpp
     meshrepair/cli_main.cpp
     meshrepair/engine_main.cpp
-    meshrepair/help_printer.cpp
     meshrepair/debug_path.cpp
     meshrepair/engine/protocol.cpp
     meshrepair/engine/engine_wrapper.cpp
-    meshrepair/engine/command_handler.cpp
+    meshrepair/engine/engine_dispatch.cpp
     meshrepair/engine/mesh_binary.cpp
     meshrepair/engine/socket_stream.cpp
     meshrepair/mesh_loader.cpp
-    meshrepair/hole_detector.cpp
-    meshrepair/hole_filler.cpp
+    meshrepair/hole_ops.cpp
     meshrepair/mesh_validator.cpp
     meshrepair/progress_reporter.cpp
     meshrepair/mesh_preprocessor.cpp
-    meshrepair/thread_manager.cpp
-    meshrepair/pipeline_processor.cpp
-    meshrepair/mesh_partitioner.cpp
-    meshrepair/submesh_extractor.cpp
-    meshrepair/mesh_merger.cpp
-    meshrepair/parallel_hole_filler.cpp
+    meshrepair/worker_pool.cpp
+    meshrepair/pipeline_ops.cpp
+    meshrepair/submesh_ops.cpp
 )
 
 # Header files
 set(MESHREPAIR_HEADERS
     meshrepair/engine/protocol.h
     meshrepair/engine/engine_wrapper.h
-    meshrepair/engine/command_handler.h
+    meshrepair/engine/engine_dispatch.h
     meshrepair/engine/mesh_binary.h
     meshrepair/engine/socket_stream.h
+    meshrepair/include/c_api.h
     meshrepair/include/types.h
     meshrepair/include/config.h
     meshrepair/include/help_printer.h
     meshrepair/include/mesh_loader.h
-    meshrepair/include/hole_detector.h
-    meshrepair/include/hole_filler.h
+    meshrepair/include/hole_ops.h
     meshrepair/include/mesh_validator.h
     meshrepair/include/progress_reporter.h
     meshrepair/include/mesh_preprocessor.h
     meshrepair/include/polygon_soup_repair.h
-    meshrepair/include/thread_manager.h
-    meshrepair/include/threadpool.h
-    meshrepair/include/pipeline_processor.h
+    meshrepair/include/worker_pool.h
+    meshrepair/include/pipeline_ops.h
     meshrepair/include/parallel_utils.h
     meshrepair/include/parallel_detection.h
-    meshrepair/include/mesh_partitioner.h
-    meshrepair/include/submesh_extractor.h
-    meshrepair/include/mesh_merger.h
-    meshrepair/include/parallel_hole_filler.h
+    meshrepair/include/submesh_ops.h
+    meshrepair/include/hole_ops.h
     meshrepair/include/thread_safe_cout.h
     meshrepair/include/debug_path.h
 )

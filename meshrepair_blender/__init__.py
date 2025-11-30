@@ -20,7 +20,7 @@ bl_info = {
     "name": "Mesh Repair",
     "author": "MeshRepair Team",
     "version": (1, 0, 0),
-    "blender": (3, 3, 0),
+    "blender": (4, 2, 0),
     "location": "View3D > Sidebar > Mesh Repair",
     "description": "Professional mesh hole filling and repair using CGAL algorithms",
     "warning": "",

@@ -104,6 +104,10 @@ Each hole is triangulated using the Liepa algorithm:
 
 The repaired mesh is written to the specified output file.
 
+### Parallel Partitioned Filling (Default)
+
+The CLI uses partitioned parallel filling by default (`--no-partition` switches to the legacy single-mesh pipeline). Holes are grouped into partitions and filled in parallel; results are merged automatically. Partition count is capped by the number of holes and a minimum edge budget (`--min-edges`) to avoid oversharding tiny holes. The `--holes_only` flag is supported only in partitioned mode.
+
 ---
 
 ## Installation
@@ -259,6 +263,12 @@ meshrepair model.obj fixed.obj --no-refine
 
 # Skip cubic search algorithm (faster, may reduce quality)
 meshrepair model.obj fixed.obj --skip-cubic
+
+# Legacy (non-partitioned) pipeline
+meshrepair model.obj fixed.obj --no-partition
+
+# Holes-only output (partitioned mode only)
+meshrepair model.obj fixed.obj --holes_only
 ```
 
 ### Threading
@@ -282,6 +292,12 @@ Generated files:
 - `debug_06_partition_*.ply` - Partitioned submeshes
 - `debug_07_partition_*_filled.ply` - Submeshes after filling
 - `debug_08_final_merged.ply` - Final merged result
+
+Notes for partitioned mode:
+- Partitions are greedily load-balanced by hole boundary size, so large holes are spread across threads.
+- Partition count is capped by hole count and a minimum edge budget (`--min-edges`) to avoid overhead on tiny holes.
+- Filled submesh dumps (`debug_07*`) now reflect the holes actually patched inside each partition.
+- `--holes_only` is honored only when partitioned mode is enabled (default).
 
 ---
 
@@ -433,6 +449,8 @@ meshrepair --engine [engine-options]
 | `--no-2d-cdt` | off | Disable 2D triangulation |
 | `--no-3d-delaunay` | off | Disable 3D triangulation fallback |
 | `--skip-cubic` | off | Skip cubic search algorithm |
+| `--holes_only` | off | Return only patched holes (partitioned mode only) |
+| `--min-edges <n>` | 100 | Minimum boundary edges per partition (partitioned mode) |
 
 ### Preprocessing Options
 
@@ -450,8 +468,11 @@ meshrepair --engine [engine-options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--threads <n>` | 0 (auto) | Worker thread count |
-| `--no-partition` | off | Disable partitioned processing |
+| `--queue-size <n>` | 10 | Pipeline queue size (legacy mode) |
+| `--no-partition` | off | Disable partitioned processing (use legacy pipeline) |
 | `--cgal-loader` | off | Force CGAL OBJ loader |
+
+Partitioned mode caps partitions to the number of holes and a minimum edge budget (`--min-edges`) to avoid oversharding tiny holes; lowering `--min-edges` increases parallelism on very small holes at the cost of overhead.
 
 ### Output Options
 

@@ -6,6 +6,8 @@ A cross-platform CLI tool for filling holes in triangle meshes using CGAL's impl
 
 - **Robust Hole Filling**: Uses constrained Delaunay triangulation (2D/3D) with automatic fallback
 - **Laplacian Fairing**: Smooth blending with configurable continuity (C⁰, C¹, C²)
+- **Partitioned Parallel Filling**: Default mode balances work across threads, capping partitions to hole count and edge budget
+- **Tunable Workload**: Minimum-edges threshold per partition (`--min-edges`) to avoid oversharding tiny holes
 - **Multi-Format Support**: OBJ, PLY, OFF formats
 - **Scalable**: Optimized for meshes with millions of polygons
 - **Cross-Platform**: Windows, Linux, macOS
@@ -81,7 +83,7 @@ make -j$(sysctl -n hw.ncpu)
 ### With Options
 
 ```bash
-./mesh_hole_filler input.ply output.ply --verbose --stats
+./mesh_hole_filler input.ply output.ply -v 2 --validate
 ```
 
 ### Advanced
@@ -105,11 +107,15 @@ make -j$(sysctl -n hw.ncpu)
 | `--no-3d-delaunay` | Disable 3D Delaunay fallback | enabled |
 | `--skip-cubic` | Skip cubic search | disabled |
 | `--no-refine` | Disable mesh refinement | enabled |
-| `-v, --verbose` | Verbose output (shows all hole details) | off |
-| `--quiet` | Minimal output | off |
-| `--stats` | Show detailed statistics | off |
+| `--holes_only` | Output only reconstructed faces (partitioned mode) | off |
+| `-v, --verbose <0-4>` | Verbosity level (0=quiet, 4=debug dumps) | 1 |
 | `--validate` | Validate mesh before/after | off |
 | `--ascii-ply` | Save PLY files in ASCII format | off (binary) |
+| `--threads <n>` | Worker threads (0 = auto) | hw_cores/2 |
+| `--queue-size <n>` | Pipeline queue size (legacy mode) | 10 |
+| `--min-edges <n>` | Minimum boundary edges to justify a partition | 100 |
+| `--no-partition` | Use legacy (single-mesh) pipeline | partitioned |
+| `--cgal-loader` | Force CGAL OBJ loader | RapidOBJ/auto |
 
 ### Preprocessing Options
 
@@ -133,6 +139,7 @@ make -j$(sysctl -n hw.ncpu)
 | 50M tris | 500 | 100 verts | 1-3 min |
 
 **Note**: Performance depends on hole boundary size, not total mesh size.
+The partitioned filler runs by default; partitions are capped by hole count and an edge budget (`--min-edges`, default 100) to avoid oversharding small holes. Adjust `--threads` and `--min-edges` together for best throughput.
 
 ## Examples
 
@@ -153,7 +160,7 @@ make -j$(sysctl -n hw.ncpu)
 
 ### Detailed analysis
 ```bash
-./mesh_hole_filler mesh.obj result.obj --verbose --stats --validate
+./mesh_hole_filler mesh.obj result.obj -v 2 --validate
 ```
 
 ### Preprocessing for damaged meshes

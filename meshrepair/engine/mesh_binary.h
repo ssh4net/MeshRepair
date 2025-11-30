@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../include/types.h"
+#include "../include/mesh_loader.h"  // For PolygonSoup
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -32,10 +33,25 @@ namespace Engine {
      * Deserialize mesh from binary format.
      *
      * @param data Binary data
+     * @param expected_vertices Optional sanity check; 0 to skip check
+     * @param expected_faces Optional sanity check; 0 to skip check
      * @return CGAL Surface_mesh
      * @throws std::runtime_error if data is invalid
      */
-    Mesh deserialize_mesh_binary(const std::vector<uint8_t>& data);
+    Mesh deserialize_mesh_binary(const std::vector<uint8_t>& data, uint32_t expected_vertices = 0,
+                                 uint32_t expected_faces = 0);
+
+    /**
+     * Deserialize mesh from binary format directly into polygon soup.
+     *
+     * @param data Binary data
+     * @param expected_vertices Optional sanity check; 0 to skip check
+     * @param expected_faces Optional sanity check; 0 to skip check
+     * @return PolygonSoup with points + triangle indices
+     * @throws std::runtime_error if data is invalid
+     */
+    PolygonSoup deserialize_mesh_binary_to_soup(const std::vector<uint8_t>& data, uint32_t expected_vertices = 0,
+                                                uint32_t expected_faces = 0);
 
     /**
      * Encode binary data as base64 string.

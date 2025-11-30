@@ -16,7 +16,7 @@ int
 main(int argc, char** argv)
 {
     // Check for --engine flag (can be anywhere in args)
-    bool engine_mode = false;
+    bool engine_mode    = false;
     bool help_requested = (argc <= 1);
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--engine") == 0) {

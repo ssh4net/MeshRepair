@@ -88,7 +88,7 @@ class MESHREPAIR_OT_Base(Operator):
             return True  # Object mode - always OK
 
         props = context.scene.meshrepair_props
-        if getattr(props, "mesh_scope", 'SELECTION') != 'SELECTION':
+        if getattr(props, "mesh_scope", 'SELECTION') not in {'SELECTION', 'REMESH'}:
             return True  # Full mesh scope - always OK
 
         # Check if there's any selection in Edit mode
@@ -111,36 +111,70 @@ class MESHREPAIR_OT_Base(Operator):
         props = context.scene.meshrepair_props
         obj = context.active_object
 
+        scope = getattr(props, "mesh_scope", 'SELECTION')
         selection_only = (
-            obj and obj.mode == 'EDIT' and
-            getattr(props, "mesh_scope", 'SELECTION') == 'SELECTION'
+            obj and obj.mode == 'EDIT' and scope in {'SELECTION', 'REMESH'}
         )
+        remesh_selection = selection_only and scope == 'REMESH'
 
         dilation = 0
         if selection_only:
             dilation = getattr(props, "selection_dilation", -1)
-            if dilation is None or dilation < 0:
+            if dilation is None or dilation <= 0:
                 dilation = self._auto_selection_dilation(props)
-        return selection_only, dilation
+            cont = getattr(props, "filling_continuity", '1')
+            min_required = 1
+            if cont == '1':
+                min_required = 2
+            elif cont == '2':
+                min_required = 3
+            if dilation < min_required:
+                dilation = min_required
+            if remesh_selection and dilation < 1:
+                dilation = 1
+        return selection_only, dilation, remesh_selection
 
     def _auto_selection_dilation(self, props):
         try:
             continuity = int(getattr(props, "filling_continuity", '1'))
         except Exception:
             continuity = 1
-        return max(1, min(3, continuity + 1))
+        if continuity <= 0:
+            return 1  # C0: one ring
+        if continuity == 1:
+            return 2  # C1: two rings
+        if continuity >= 2:
+            return 3  # C2: three rings
+        return 1
+
+    def _ensure_selection_has_holes(self, export_result):
+        """
+        Guard against running selection mode when no holes exist; advise Remesh instead.
+        Returns True if safe to proceed, False to cancel.
+        """
+        if export_result.selection_only and not export_result.remesh_selection:
+            hole_count = getattr(export_result, "selection_hole_count", 0)
+            if hole_count <= 0:
+                msg = "No holes found in selection. Use Remesh mode to fill a selected patch."
+                self.console_report('WARNING', msg)
+                return False
+        return True
 
     def _export_active_mesh(self, context):
         obj = context.active_object
-        selection_only, dilation = self._selection_settings(context)
+        selection_only, dilation, remesh_selection = self._selection_settings(context)
         export_result = export_mesh_to_data(
             obj,
             selection_only=selection_only,
-            dilation_iters=dilation
+            dilation_iters=dilation,
+            remesh_selection=remesh_selection
         )
 
         if selection_only and not export_result.selection_only:
             self.console_report('WARNING', "Selection was empty; processed whole mesh instead.")
+        elif export_result.remesh_selection:
+            removed_faces = len(getattr(export_result, "faces_to_delete", []) or [])
+            self.console_report('INFO', f"Remesh mode: treating {removed_faces} selected face(s) as a hole.")
         elif export_result.selection_only and dilation > 0:
             self.console_report('INFO', f"Selection expanded by {dilation} iteration(s).")
 
@@ -299,7 +333,13 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
             # Export mesh data (no temp files)
             self.report({'INFO'}, "Exporting mesh data...")
             export_result = self._export_active_mesh(context)
+            if not self._ensure_selection_has_holes(export_result):
+                return {'CANCELLED'}
             mesh_data = export_result.mesh_data
+            # Guard selection borders (skip filling holes that are exactly on the selection boundary) in both
+            # Selection and Remesh scopes; disable for whole-mesh/object runs.
+            selection_guard = bool(export_result.selection_only)
+            holes_only = bool(export_result.selection_only)
 
             # Start engine session
             session = EngineSession(
@@ -322,7 +362,8 @@ class MESHREPAIR_OT_detect_holes(MESHREPAIR_OT_Base):
                 "max_boundary": max_boundary,
                 "max_hole_boundary_vertices": max_boundary,
                 "max_diameter": max_diameter,
-                "max_hole_diameter_ratio": max_diameter
+                "max_hole_diameter_ratio": max_diameter,
+                "guard_selection_boundary": selection_guard
             }
 
             # Detect holes
@@ -388,7 +429,11 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
             # Export mesh data (no temp files)
             self.report({'INFO'}, "Exporting mesh data...")
             export_result = self._export_active_mesh(context)
+            if not self._ensure_selection_has_holes(export_result):
+                return {'CANCELLED'}
             mesh_data = export_result.mesh_data
+            selection_guard = bool(export_result.selection_only)
+            holes_only = bool(export_result.selection_only)
 
             # Start engine session
             session = EngineSession(
@@ -419,8 +464,13 @@ class MESHREPAIR_OT_fill_holes(MESHREPAIR_OT_Base):
                 "max_boundary": max_boundary,
                 "max_hole_boundary_vertices": max_boundary,
                 "max_diameter": max_diameter,
-                "max_hole_diameter_ratio": max_diameter
+                "max_hole_diameter_ratio": max_diameter,
+                "guard_selection_boundary": selection_guard,
+                "holes_only": holes_only
             }
+            if holes_only and not options["use_partitioned"]:
+                options["use_partitioned"] = True
+                self.console_report('INFO', "Selection/Remesh mode: enabling partitioned pipeline for holes-only output.")
 
             # Fill holes
             self.console_report('INFO', "Filling holes...")
@@ -527,7 +577,11 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
             # Export mesh data (no temp files)
             self.report({'INFO'}, "Exporting mesh data...")
             export_result = self._export_active_mesh(context)
+            if not self._ensure_selection_has_holes(export_result):
+                return {'CANCELLED'}
             mesh_data = export_result.mesh_data
+            selection_guard = bool(export_result.selection_only)
+            holes_only = bool(export_result.selection_only)
 
             # Start engine session
             session = EngineSession(
@@ -576,8 +630,15 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
                 "max_boundary": max_boundary,
                 "max_hole_boundary_vertices": max_boundary,
                 "max_diameter": max_diameter,
-                "max_hole_diameter_ratio": max_diameter
+                "max_hole_diameter_ratio": max_diameter,
+                "guard_selection_boundary": selection_guard,
+                "holes_only": holes_only,
+                # Carry preprocessing preference into final cleanup (partition merge)
+                "keep_largest_component": props.preprocess_keep_largest
             }
+            if holes_only and not filling_options["use_partitioned"]:
+                filling_options["use_partitioned"] = True
+                self.console_report('INFO', "Selection/Remesh mode: enabling partitioned pipeline for holes-only output.")
 
             # Fill holes
             self.console_report('INFO', "Filling holes...")
