@@ -450,7 +450,10 @@ cli_main(int argc, char** argv)
         auto program_end_time = std::chrono::high_resolution_clock::now();
         double total_program_time_ms
             = std::chrono::duration<double, std::milli>(program_end_time - program_start_time).count();
-        stats_report << "  Total program time: " << total_program_time_ms << " ms\n";
+        // set std::ostringstream precision to 3 decimal places for seconds
+        stats_report.precision(4);
+        stats_report << "  Total program time: " << total_program_time_ms /1000.0 << " s\n";
+        stats_report.precision(2);
 
         logInfo(LogCategory::Cli, stats_report.str());
 

@@ -437,6 +437,8 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
             auto bbox    = CGAL::bounding_box(all_points.begin(), all_points.end());
             ref_diagonal = std::sqrt(CGAL::to_double(CGAL::squared_distance(bbox.min(), bbox.max())));
         }
+        // Preserve the original mesh diagonal so submesh filling does not tighten the limit
+        filling_options.reference_bbox_diagonal = ref_diagonal;
     }
 
     for (const auto& hole : all_holes) {
