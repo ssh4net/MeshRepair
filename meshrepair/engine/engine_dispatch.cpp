@@ -112,10 +112,10 @@ namespace Engine {
             (void)show_stats;
             (void)socket_mode;
             PreprocessingOptions options {};
-            options.remove_duplicates      = params.value("remove_duplicates", options.remove_duplicates);
-            options.remove_non_manifold    = params.value("remove_non_manifold", options.remove_non_manifold);
-            options.remove_3_face_fans     = params.value("remove_3_face_fans", options.remove_3_face_fans);
-            options.remove_isolated        = params.value("remove_isolated", options.remove_isolated);
+            options.remove_duplicates   = params.value("remove_duplicates", options.remove_duplicates);
+            options.remove_non_manifold = params.value("remove_non_manifold", options.remove_non_manifold);
+            options.remove_3_face_fans  = params.value("remove_3_face_fans", options.remove_3_face_fans);
+            options.remove_isolated     = params.value("remove_isolated", options.remove_isolated);
             // IPC: default to false unless explicitly true to avoid accidental pruning when addon omits the field
             options.keep_largest_component = params.value("keep_largest_component", false);
             options.non_manifold_passes    = params.value("non_manifold_passes", options.non_manifold_passes);
@@ -145,10 +145,9 @@ namespace Engine {
             options.refine                       = params.value("refine", options.refine);
             options.guard_selection_boundary     = params.value("guard_selection_boundary",
                                                                 options.guard_selection_boundary);
-            options.keep_largest_component       = params.value("keep_largest_component",
-                                                                options.keep_largest_component);
-            options.holes_only                   = params.value("holes_only", options.holes_only);
-            options.verbose                      = verbose;
+            options.keep_largest_component = params.value("keep_largest_component", options.keep_largest_component);
+            options.holes_only             = params.value("holes_only", options.holes_only);
+            options.verbose                = verbose;
             engine.detect_holes(options);
             nlohmann::json resp = create_success_response("Hole detection complete");
             resp["stats"]       = engine.get_hole_detection_stats();
@@ -173,11 +172,10 @@ namespace Engine {
             options.refine                       = params.value("refine", options.refine);
             options.guard_selection_boundary     = params.value("guard_selection_boundary",
                                                                 options.guard_selection_boundary);
-            options.keep_largest_component       = params.value("keep_largest_component",
-                                                                options.keep_largest_component);
-            options.holes_only                   = params.value("holes_only", options.holes_only);
-            options.verbose                      = verbose;
-            bool use_partitioned                 = params.value("use_partitioned", true);
+            options.keep_largest_component = params.value("keep_largest_component", options.keep_largest_component);
+            options.holes_only             = params.value("holes_only", options.holes_only);
+            options.verbose                = verbose;
+            bool use_partitioned           = params.value("use_partitioned", true);
             engine.fill_holes(options, use_partitioned);
             nlohmann::json resp = create_success_response("Hole filling complete");
             resp["stats"]       = engine.get_hole_filling_stats();
@@ -226,7 +224,7 @@ namespace Engine {
             (void)verbose;
             (void)show_stats;
             (void)socket_mode;
-            nlohmann::json resp = create_success_response();
+            nlohmann::json resp   = create_success_response();
             resp["version"]       = Config::VERSION;
             resp["version_major"] = Config::VERSION_MAJOR;
             resp["version_minor"] = Config::VERSION_MINOR;

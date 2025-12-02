@@ -22,6 +22,11 @@ struct PreprocessingStats {
 
     // Detailed timing breakdown
     double soup_cleanup_time_ms = 0.0;  // Time in soup space (duplicates, non-manifold, etc.)
+    double duplicates_time_ms   = 0.0;
+    double degenerate_time_ms   = 0.0;
+    double non_manifold_time_ms = 0.0;
+    double face_fans_time_ms    = 0.0;
+    double orient_time_ms       = 0.0;
     double soup_to_mesh_time_ms = 0.0;  // Time converting soup to mesh
     double mesh_cleanup_time_ms = 0.0;  // Time in mesh space (isolated vertices, components)
 
@@ -46,9 +51,6 @@ struct PreprocessingOptions {
 class MeshPreprocessor {
 public:
     MeshPreprocessor(Mesh& mesh, const PreprocessingOptions& options = PreprocessingOptions());
-
-    // Run all enabled preprocessing steps (OLD API - converts mesh to soup internally)
-    PreprocessingStats preprocess();
 
     // Run preprocessing on polygon soup directly (RECOMMENDED - avoids mesh->soup extraction)
     // Takes soup as input, modifies in place, converts to mesh at end
@@ -79,8 +81,6 @@ private:
 };
 
 // C-style helpers (status + out params, 0 on success)
-int
-preprocess_mesh_c(Mesh* mesh, const PreprocessingOptions* options, PreprocessingStats* out_stats);
 int
 preprocess_soup_c(PolygonSoup* soup, Mesh* out_mesh, const PreprocessingOptions* options,
                   PreprocessingStats* out_stats);

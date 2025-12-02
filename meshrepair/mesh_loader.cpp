@@ -1,4 +1,5 @@
 #include "mesh_loader.h"
+#include "logger.h"
 #include <CGAL/IO/OBJ.h>
 #include <CGAL/IO/OFF.h>
 #include <CGAL/IO/PLY.h>
@@ -8,7 +9,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
+#include <sstream>
+#include <string>
 
 #ifdef HAVE_RAPIDOBJ
 #    include <rapidobj/rapidobj.hpp>
@@ -102,18 +104,21 @@ namespace MeshLoader {
         auto end_time = std::chrono::high_resolution_clock::now();
         auto total_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
-        std::cerr << "Loaded mesh from: " << filename << " (RapidOBJ)\n"
-                  << "  Vertices: " << mesh.number_of_vertices() << "\n"
-                  << "  Faces: " << mesh.number_of_faces() << " (added: " << faces_added;
+        std::ostringstream load_log;
+        load_log << "Loaded mesh from: " << filename << " (RapidOBJ)\n"
+                 << "  Vertices: " << mesh.number_of_vertices() << "\n"
+                 << "  Faces: " << mesh.number_of_faces() << " (added: " << faces_added;
         if (faces_failed > 0) {
-            std::cerr << ", failed: " << faces_failed;
+            load_log << ", failed: " << faces_failed;
         }
-        std::cerr << ")\n"
-                  << "  Edges: " << mesh.number_of_edges() << "\n"
-                  << "  Total time: " << total_ms << " ms\n";
+        load_log << ")\n"
+                 << "  Edges: " << mesh.number_of_edges() << "\n"
+                 << "  Total time: " << total_ms << " ms";
+        logInfo(LogCategory::Cli, load_log.str());
 
         if (faces_failed > 0) {
-            std::cerr << "Warning: " << faces_failed << " faces failed to add (non-manifold or duplicate)\n";
+            logWarn(LogCategory::Cli,
+                    "Warning: " + std::to_string(faces_failed) + " faces failed to add (non-manifold or duplicate)");
         }
 
         *out_mesh = std::move(mesh);

@@ -1,6 +1,7 @@
 #include "mesh_preprocessor.h"
 #include "mesh_loader.h"  // For PolygonSoup
 #include "polygon_soup_repair.h"
+#include "polygon_soup_validation.h"
 #include <CGAL/Polygon_mesh_processing/repair.h>
 #include <CGAL/Polygon_mesh_processing/repair_polygon_soup.h>
 #include <CGAL/Polygon_mesh_processing/orient_polygon_soup.h>
@@ -10,14 +11,15 @@
 #include <CGAL/boost/graph/helpers.h>
 #include <CGAL/IO/PLY.h>
 #include "debug_path.h"
-#include <iostream>
+#include "include/logger.h"
 #include <chrono>
 #include <vector>
 #include <map>
 #include <set>
-#include <unordered_map>
 #include <algorithm>
 #include <iomanip>
+#include <string>
+#include <sstream>
 
 namespace PMP = CGAL::Polygon_mesh_processing;
 
@@ -30,305 +32,9 @@ MeshPreprocessor::MeshPreprocessor(Mesh& mesh, const PreprocessingOptions& optio
 {
 }
 
-PreprocessingStats
-MeshPreprocessor::preprocess()
-{
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    size_t initial_vertices = mesh_.number_of_vertices();
-    size_t initial_faces    = mesh_.number_of_faces();
-
-    if (options_.verbose) {
-        std::cerr << "\n=== Mesh Preprocessing ===\n";
-        std::cerr << "Initial mesh state:\n";
-        std::cerr << "  Vertices: " << initial_vertices << "\n";
-        std::cerr << "  Faces: " << initial_faces << "\n\n";
-    }
-
-    // =============================================================================
-    // PHASE 1: POLYGON SOUP PROCESSING (Most cleanup happens here)
-    // =============================================================================
-
-    if (options_.verbose) {
-        std::cerr << "[Phase 1] Polygon Soup Cleanup\n";
-    }
-
-    // Step 1.1: Extract mesh to polygon soup
-    if (options_.verbose) {
-        std::cerr << "[1/6] Extracting polygon soup...\n";
-    }
-
-    // OPTIMIZATION: Pre-allocate vectors with exact sizes to avoid reallocations
-    size_t num_vertices = mesh_.number_of_vertices();
-    size_t num_faces    = mesh_.number_of_faces();
-
-    std::vector<Point_3> points;
-    std::vector<std::vector<std::size_t>> polygons;
-
-    points.reserve(num_vertices);
-    polygons.reserve(num_faces);
-
-    // Extract vertices - build index map and populate points
-    std::map<vertex_descriptor, std::size_t> vertex_index_map;
-    std::size_t v_idx = 0;
-    for (auto v : mesh_.vertices()) {
-        vertex_index_map[v] = v_idx++;
-        points.push_back(mesh_.point(v));
-    }
-
-    // Extract faces - pre-reserve typical polygon size to avoid reallocations
-    for (auto f : mesh_.faces()) {
-        std::vector<std::size_t> polygon;
-        polygon.reserve(4);  // Reserve for typical triangle/quad (avoids reallocation)
-        for (auto v : CGAL::vertices_around_face(CGAL::halfedge(f, mesh_), mesh_)) {
-            polygon.push_back(vertex_index_map[v]);
-        }
-        polygons.push_back(std::move(polygon));  // Move to avoid copy
-    }
-
-    if (options_.debug && options_.verbose) {
-        std::cerr << "  [DEBUG] Extracted soup: " << points.size() << " points, " << polygons.size() << " polygons\n";
-    }
-
-    // Step 1.2: Remove duplicate points in soup
-    if (options_.remove_duplicates) {
-        if (options_.verbose) {
-            std::cerr << "[2/6] Removing duplicate points...\n";
-        }
-
-        size_t points_before = points.size();
-        PMP::merge_duplicate_points_in_polygon_soup(points, polygons);
-        stats_.duplicates_merged = points_before - points.size();
-
-        if (options_.verbose) {
-            std::cerr << "  Merged: " << stats_.duplicates_merged << " duplicate points\n\n";
-        }
-    }
-
-    // Step 1.3: Remove duplicate polygons
-    if (options_.remove_duplicates) {
-        size_t polygons_before = polygons.size();
-        PMP::merge_duplicate_polygons_in_polygon_soup(points, polygons);
-
-        if (options_.debug && options_.verbose && polygons_before > polygons.size()) {
-            std::cerr << "  [DEBUG] Removed " << (polygons_before - polygons.size()) << " duplicate polygons\n";
-        }
-    }
-
-    // Step 1.4: Remove degenerate polygons (< 3 unique vertices)
-    if (options_.verbose) {
-        std::cerr << "[3/6] Removing degenerate polygons...\n";
-    }
-
-    size_t before_degenerate = polygons.size();
-    auto it = std::remove_if(polygons.begin(), polygons.end(), [](const std::vector<std::size_t>& poly) {
-        if (poly.size() < 3)
-            return true;
-        std::set<std::size_t> unique_verts(poly.begin(), poly.end());
-        return unique_verts.size() < 3;
-    });
-    polygons.erase(it, polygons.end());
-
-    if (options_.verbose) {
-        std::cerr << "  Removed: " << (before_degenerate - polygons.size()) << " degenerate polygons\n\n";
-    }
-
-    // Step 1.5: Remove non-manifold vertices/edges in soup (CRITICAL!)
-    // Uses recursive local search - checks affected vertices only after first pass
-    if (options_.remove_non_manifold) {
-        if (options_.verbose) {
-            std::cerr << "[4/7] Removing non-manifold vertices/edges (recursive local search)...\n";
-        }
-
-        // Use recursive local search with max depth from options (default: 10)
-        size_t max_depth = (options_.non_manifold_passes > 0) ? options_.non_manifold_passes : 10;
-        auto nm_result = PolygonSoupRepair::remove_non_manifold_polygons_detailed(polygons, max_depth, options_.debug);
-        stats_.non_manifold_vertices_removed = nm_result.total_polygons_removed;
-
-        if (options_.verbose) {
-            std::cerr << "  Removed: " << nm_result.total_polygons_removed << " polygon(s) "
-                      << "in " << nm_result.iterations_executed << " iteration(s)";
-            if (nm_result.hit_max_iterations) {
-                std::cerr << " (hit max limit of " << max_depth << ")";
-            }
-            std::cerr << "\n\n";
-        }
-    }
-
-    // Step 1.6: Remove 3-face fans (simplification)
-    if (options_.remove_3_face_fans) {
-        if (options_.verbose) {
-            std::cerr << "[5/7] Collapsing 3-face fans...\n";
-        }
-
-        size_t fans_collapsed      = PolygonSoupRepair::remove_3_face_fans(points, polygons);
-        stats_.face_fans_collapsed = fans_collapsed;
-
-        if (options_.verbose) {
-            std::cerr << "  Collapsed: " << fans_collapsed << " 3-face fan(s)\n\n";
-        }
-
-        // Debug: Save mesh after fan removal
-        if (options_.debug) {
-            std::string debug_file = MeshRepair::DebugPath::step_file("after_3_face_fans");
-            Mesh debug_mesh;
-            PMP::polygon_soup_to_polygon_mesh(points, polygons, debug_mesh);
-            if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
-                if (options_.verbose) {
-                    std::cerr << "  [DEBUG] Saved soup (after 3-face fans): " << debug_file << "\n";
-                    std::cerr << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
-                              << debug_mesh.number_of_faces() << " faces\n";
-                }
-            }
-        }
-    }
-
-    // Step 1.7: Orient polygon soup (face normals)
-    if (options_.verbose) {
-        std::cerr << "[6/7] Orienting polygon soup...\n";
-    }
-
-    // Debug: Save soup BEFORE orient
-    if (options_.debug) {
-        std::string debug_file = MeshRepair::DebugPath::step_file("before_orient");
-        Mesh debug_mesh;
-        PMP::polygon_soup_to_polygon_mesh(points, polygons, debug_mesh);
-
-        if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
-            if (options_.verbose) {
-                std::cerr << "  [DEBUG] Saved soup (before orient): " << debug_file << "\n";
-                std::cerr << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
-                          << debug_mesh.number_of_faces() << " faces\n";
-            }
-        }
-    }
-
-    bool oriented = PMP::orient_polygon_soup(points, polygons);
-
-    if (options_.verbose) {
-        if (oriented) {
-            std::cerr << "  Oriented successfully\n\n";
-        } else {
-            std::cerr << "  Warning: Some points were duplicated during orientation\n\n";
-        }
-    }
-
-    // Step 1.8: Convert soup to mesh (ONCE!)
-    if (options_.verbose) {
-        std::cerr << "[7/7] Converting soup to mesh...\n";
-    }
-
-    mesh_.clear();
-    PMP::polygon_soup_to_polygon_mesh(points, polygons, mesh_);
-
-    if (options_.verbose) {
-        std::cerr << "  Mesh: " << mesh_.number_of_vertices() << " vertices, " << mesh_.number_of_faces()
-                  << " faces\n\n";
-    }
-
-    // Debug: Save mesh after soup conversion
-    if (options_.debug) {
-        std::string debug_file = MeshRepair::DebugPath::step_file("after_soup_cleanup");
-        if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
-            if (options_.verbose) {
-                std::cerr << "  [DEBUG] Saved: " << debug_file << "\n\n";
-            }
-        }
-    }
-
-    // =============================================================================
-    // PHASE 2: MESH-LEVEL PROCESSING (Quick cleanups requiring halfedge structure)
-    // =============================================================================
-
-    if (options_.verbose) {
-        std::cerr << "[Phase 2] Mesh-Level Cleanup\n";
-    }
-
-    // Step 2.1: Remove isolated vertices (vertices with no incident faces)
-    if (options_.remove_isolated) {
-        if (options_.verbose) {
-            std::cerr << "[7/8] Removing isolated vertices...\n";
-        }
-        stats_.isolated_vertices_removed = remove_isolated_vertices();
-        if (options_.verbose) {
-            std::cerr << "  Removed: " << stats_.isolated_vertices_removed << " isolated vertices\n\n";
-        }
-
-        // Debug: dump intermediate mesh
-        if (options_.debug) {
-            if (mesh_.has_garbage()) {
-                mesh_.collect_garbage();
-            }
-            std::string debug_file = MeshRepair::DebugPath::step_file("after_isolated");
-            if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
-                if (options_.verbose) {
-                    std::cerr << "  [DEBUG] Saved: " << debug_file << "\n\n";
-                }
-            }
-        }
-    }
-
-    // Step 2.2: Keep only largest connected component
-    if (options_.keep_largest_component) {
-        if (options_.verbose) {
-            std::cerr << "[8/8] Keeping only largest connected component...\n";
-        }
-        stats_.small_components_removed = keep_only_largest_connected_component();
-        if (options_.verbose) {
-            std::cerr << "  Found: " << stats_.connected_components_found << " component(s)\n";
-            std::cerr << "  Removed: " << stats_.small_components_removed << " small component(s)\n\n";
-        }
-
-        // Debug: dump intermediate mesh
-        if (options_.debug) {
-            if (mesh_.has_garbage()) {
-                mesh_.collect_garbage();
-            }
-            std::string debug_file = MeshRepair::DebugPath::step_file("after_components");
-            if (CGAL::IO::write_PLY(debug_file, mesh_, CGAL::parameters::use_binary_mode(true))) {
-                if (options_.verbose) {
-                    std::cerr << "  [DEBUG] Saved: " << debug_file << "\n\n";
-                }
-            }
-        }
-    }
-
-    auto end_time        = std::chrono::high_resolution_clock::now();
-    stats_.total_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-
-    // Collect garbage to compact the mesh and remove marked elements
-    // This is CRITICAL before saving - otherwise face indices will be invalid
-    if (mesh_.has_garbage()) {
-        if (options_.verbose) {
-            std::cerr << "Collecting garbage (compacting mesh)...\n";
-        }
-        mesh_.collect_garbage();
-    }
-
-    // Validate mesh topology
-    if (options_.verbose) {
-        std::cerr << "Validating mesh topology...\n";
-    }
-    bool is_valid = CGAL::is_valid_polygon_mesh(mesh_, options_.verbose);
-    if (!is_valid) {
-        std::cerr << "WARNING: Mesh is not valid after preprocessing!\n";
-        std::cerr << "The mesh may have topological issues. Attempting to continue anyway...\n";
-    }
-
-    if (options_.verbose) {
-        std::cerr << "Final mesh state:\n";
-        std::cerr << "  Vertices: " << mesh_.number_of_vertices() << "\n";
-        std::cerr << "  Faces: " << mesh_.number_of_faces() << "\n";
-        std::cerr << "  Valid: " << (is_valid ? "YES" : "NO") << "\n";
-        std::cerr << "  Time: " << std::fixed << std::setprecision(2) << stats_.total_time_ms << " ms\n";
-        std::cerr << "==========================\n\n";
-    }
-
-    return stats_;
-}
 
 // ============================================================================
-// Mesh-level helper functions (used by old preprocess() API)
+// Mesh-level helper functions
 // ============================================================================
 
 size_t
@@ -371,8 +77,8 @@ MeshPreprocessor::keep_only_largest_connected_component()
     }
 
     if (options_.verbose) {
-        std::cerr << "  Largest component ID: " << largest_component_id << " with " << largest_component_size
-                  << " faces\n";
+        logDetail(LogCategory::Preprocess, "Largest component ID: " + std::to_string(largest_component_id) + " with "
+                                               + std::to_string(largest_component_size) + " faces");
     }
 
     // Remove all faces NOT in the largest component
@@ -402,15 +108,22 @@ MeshPreprocessor::keep_only_largest_connected_component()
 void
 MeshPreprocessor::print_report() const
 {
-    std::cerr << "\n=== Preprocessing Report ===\n";
-    std::cerr << "Duplicate vertices merged: " << stats_.duplicates_merged << "\n";
-    std::cerr << "Non-manifold polygons removed: " << stats_.non_manifold_vertices_removed << "\n";
-    std::cerr << "3-face fans collapsed: " << stats_.face_fans_collapsed << "\n";
-    std::cerr << "Isolated vertices removed: " << stats_.isolated_vertices_removed << "\n";
-    std::cerr << "Connected components found: " << stats_.connected_components_found << "\n";
-    std::cerr << "Small components removed: " << stats_.small_components_removed << "\n";
-    std::cerr << "Total time: " << std::fixed << std::setprecision(2) << stats_.total_time_ms << " ms\n";
-    std::cerr << "============================\n\n";
+    logDetail(LogCategory::Preprocess, "=== Preprocessing Report ===");
+    logDetail(LogCategory::Preprocess, "Duplicate vertices merged: " + std::to_string(stats_.duplicates_merged));
+    logDetail(LogCategory::Preprocess,
+              "Non-manifold polygons removed: " + std::to_string(stats_.non_manifold_vertices_removed));
+    logDetail(LogCategory::Preprocess, "3-face fans collapsed: " + std::to_string(stats_.face_fans_collapsed));
+    logDetail(LogCategory::Preprocess,
+              "Isolated vertices removed: " + std::to_string(stats_.isolated_vertices_removed));
+    logDetail(LogCategory::Preprocess,
+              "Connected components found: " + std::to_string(stats_.connected_components_found));
+    logDetail(LogCategory::Preprocess, "Small components removed: " + std::to_string(stats_.small_components_removed));
+    {
+        std::ostringstream oss;
+        oss << "Total time: " << std::fixed << std::setprecision(2) << stats_.total_time_ms << " ms";
+        logDetail(LogCategory::Preprocess, oss.str());
+    }
+    logDetail(LogCategory::Preprocess, "============================\n");
 }
 
 // Static function: preprocess polygon soup directly (avoids mesh->soup extraction!)
@@ -426,10 +139,9 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     size_t initial_polygons = soup.polygons.size();
 
     if (options.verbose) {
-        std::cerr << "\n=== Mesh Preprocessing (Soup-Based) ===\n";
-        std::cerr << "Initial soup state:\n";
-        std::cerr << "  Points: " << initial_points << "\n";
-        std::cerr << "  Polygons: " << initial_polygons << "\n\n";
+        logDetail(LogCategory::Preprocess, "=== Mesh Preprocessing (Soup-Based) ===");
+        logDetail(LogCategory::Preprocess, "Initial soup state: points=" + std::to_string(initial_points)
+                                               + ", polygons=" + std::to_string(initial_polygons));
     }
 
     // =========================================================================
@@ -437,37 +149,44 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     // =========================================================================
 
     if (options.verbose) {
-        std::cerr << "[Phase 1] Polygon Soup Cleanup\n";
+        logDetail(LogCategory::Preprocess, "[Phase 1] Polygon Soup Cleanup");
     }
 
+    auto duplicates_start = std::chrono::high_resolution_clock::now();
     //
     // Step 1.1: Remove duplicate points
     if (options.remove_duplicates) {
         if (options.verbose) {
-            std::cerr << "[1/6] Removing duplicate points...\n";
+            logDetail(LogCategory::Preprocess, "[1/6] Removing duplicate points...");
         }
         size_t points_before = soup.points.size();
         PMP::merge_duplicate_points_in_polygon_soup(soup.points, soup.polygons);
         stats.duplicates_merged = points_before - soup.points.size();
         if (options.verbose) {
-            std::cerr << "  Merged: " << stats.duplicates_merged << " duplicate points\n\n";
+            logDetail(LogCategory::Preprocess,
+                      "Merged: " + std::to_string(stats.duplicates_merged) + " duplicate points");
         }
     }
+    auto duplicates_end      = std::chrono::high_resolution_clock::now();
+    stats.duplicates_time_ms = std::chrono::duration<double, std::milli>(duplicates_end - duplicates_start).count();
 
+    auto degenerate_start = std::chrono::high_resolution_clock::now();
     //
     // Step 1.2: Remove duplicate polygons
     if (options.remove_duplicates) {
         size_t polygons_before = soup.polygons.size();
         PMP::merge_duplicate_polygons_in_polygon_soup(soup.points, soup.polygons);
         if (options.debug && options.verbose && polygons_before > soup.polygons.size()) {
-            std::cerr << "  [DEBUG] Removed " << (polygons_before - soup.polygons.size()) << " duplicate polygons\n";
+            logDebug(LogCategory::Preprocess, "[DEBUG] Removed "
+                                                  + std::to_string(polygons_before - soup.polygons.size())
+                                                  + " duplicate polygons");
         }
     }
 
     //
     // Step 1.3: Remove degenerate polygons
     if (options.verbose) {
-        std::cerr << "[2/6] Removing degenerate polygons...\n";
+        logDetail(LogCategory::Preprocess, "[2/6] Removing degenerate polygons...");
     }
     size_t before_degenerate = soup.polygons.size();
     auto it = std::remove_if(soup.polygons.begin(), soup.polygons.end(), [](const std::vector<std::size_t>& poly) {
@@ -478,67 +197,103 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     });
     soup.polygons.erase(it, soup.polygons.end());
     if (options.verbose) {
-        std::cerr << "  Removed: " << (before_degenerate - soup.polygons.size()) << " degenerate polygons\n\n";
+        logDetail(LogCategory::Preprocess,
+                  "Removed: " + std::to_string(before_degenerate - soup.polygons.size()) + " degenerate polygons");
     }
+    auto degenerate_end      = std::chrono::high_resolution_clock::now();
+    stats.degenerate_time_ms = std::chrono::duration<double, std::milli>(degenerate_end - degenerate_start).count();
 
     if (options.debug) {
         MeshPreprocessor::plyDump(soup, DebugPath::step_file("after_removal"), "Saved soup (after degenerate removal)",
                                   options.verbose);
     }
 
+    auto face_fans_start = std::chrono::high_resolution_clock::now();
     //
-    // Step 1.4: Remove non-manifold vertices/edges
-    if (options.remove_non_manifold) {
-        if (options.verbose) {
-            std::cerr << "[4/6] Removing non-manifold vertices/edges (recursive local search)...\n";
-        }
-        size_t max_depth = (options.non_manifold_passes > 0) ? options.non_manifold_passes : 10;
-        auto nm_result   = PolygonSoupRepair::remove_non_manifold_polygons_detailed(soup.polygons, max_depth,
-                                                                                    options.debug);
-        stats.non_manifold_vertices_removed = nm_result.total_polygons_removed;
-        if (options.verbose) {
-            std::cerr << "  Removed: " << nm_result.total_polygons_removed << " polygon(s) "
-                      << "in " << nm_result.iterations_executed << " iteration(s)";
-            if (nm_result.hit_max_iterations) {
-                std::cerr << " (hit max limit of " << max_depth << ")";
-            }
-            std::cerr << "\n\n";
-        }
-    }
-
-    if (options.debug) {
-        MeshPreprocessor::plyDump(soup, DebugPath::step_file("after_non_manifold_removal"),
-                                  "Saved soup (after non-manifold removal)", options.verbose);
-    }
-
-    //
-    // Step 1.5: Remove 3-face fans
+    // Step 1.4: Remove 3-face fans
     if (options.remove_3_face_fans) {
         if (options.verbose) {
-            std::cerr << "[3/6] Collapsing 3-face fans...\n";
+            logDetail(LogCategory::Preprocess, "[3/6] Collapsing 3-face fans...");
         }
         size_t fans_collapsed     = PolygonSoupRepair::remove_3_face_fans(soup.points, soup.polygons);
         stats.face_fans_collapsed = fans_collapsed;
         if (options.verbose) {
-            std::cerr << "  Collapsed: " << fans_collapsed << " 3-face fan(s)\n\n";
+            logDetail(LogCategory::Preprocess, "Collapsed: " + std::to_string(fans_collapsed) + " 3-face fan(s)");
         }
     }
+    auto face_fans_end      = std::chrono::high_resolution_clock::now();
+    stats.face_fans_time_ms = std::chrono::duration<double, std::milli>(face_fans_end - face_fans_start).count();
 
     if (options.debug) {
         MeshPreprocessor::plyDump(soup, DebugPath::step_file("after_3_face_fans"), "Saved soup (after 3-face fans)",
                                   options.verbose);
     }
 
+    auto non_manifold_start = std::chrono::high_resolution_clock::now();
     //
-    // Step 1.6: Orient polygon soup
+    // Step 1.5: Remove non-manifold vertices/edges
+    if (options.remove_non_manifold) {
+        if (options.verbose) {
+            logDetail(LogCategory::Preprocess,
+                      "[4/6] Removing non-manifold vertices/edges (recursive local search)...");
+        }
+        size_t max_depth = (options.non_manifold_passes > 0) ? options.non_manifold_passes : 10;
+        auto nm_result   = PolygonSoupRepair::remove_non_manifold_polygons_detailed(soup.polygons, max_depth,
+                                                                                    options.debug);
+        stats.non_manifold_vertices_removed = nm_result.total_polygons_removed;
+        if (options.verbose) {
+            std::ostringstream oss;
+            oss << "Removed: " << nm_result.total_polygons_removed << " polygon(s) in " << nm_result.iterations_executed
+                << " iteration(s)";
+            if (nm_result.hit_max_iterations) {
+                oss << " (hit max limit of " << max_depth << ")";
+            }
+            logDetail(LogCategory::Preprocess, oss.str());
+        }
+    }
+    auto non_manifold_end = std::chrono::high_resolution_clock::now();
+    stats.non_manifold_time_ms
+        = std::chrono::duration<double, std::milli>(non_manifold_end - non_manifold_start).count();
+
+    if (options.debug) {
+        MeshPreprocessor::plyDump(soup, DebugPath::step_file("after_non_manifold_removal"),
+                                  "Saved soup (after non-manifold removal)", options.verbose);
+    }
+
+    auto orient_start = non_manifold_end;
+    //
+    // Step 1.6: Orient polygon soup (disabled for now)
+#if false
     if (options.verbose) {
-        std::cerr << "[5/6] Orienting polygon soup...\n";
+        logDetail(LogCategory::Preprocess, "[5/6] Orienting polygon soup...");
     }
     bool oriented = PMP::orient_polygon_soup(soup.points, soup.polygons);
     if (options.verbose) {
-        std::cerr << (oriented ? "  Oriented successfully" : "  Warning: Some points duplicated during orientation")
-                  << "\n\n";
+        logDetail(LogCategory::Preprocess,
+                  oriented ? "Oriented successfully" : "Warning: Some points duplicated during orientation");
     }
+    auto orient_end        = std::chrono::high_resolution_clock::now();
+#else
+    auto orient_end = orient_start;
+#endif
+    stats.orient_time_ms = std::chrono::duration<double, std::milli>(orient_end - orient_start).count();
+
+#if false
+    auto validation_result = validate_polygon_soup_basic(soup.points, soup.polygons);
+    if (options.verbose) {
+        if (validation_result.polygons_removed_total == 0) {
+            logDetail(LogCategory::Preprocess, "Soup validation: no additional issues found");
+        } else {
+            std::ostringstream oss;
+            oss << "Soup validation removed " << validation_result.polygons_removed_total << " polygon(s)"
+                << " [out_of_bounds=" << validation_result.polygons_removed_out_of_bounds
+                << ", invalid_cycle=" << validation_result.polygons_removed_invalid_cycle
+                << ", edge_orientation=" << validation_result.polygons_removed_edge_orientation
+                << ", non_manifold=" << validation_result.polygons_removed_non_manifold << "]";
+            logWarn(LogCategory::Preprocess, oss.str());
+        }
+    }
+#endif
 
     auto soup_end              = std::chrono::high_resolution_clock::now();
     stats.soup_cleanup_time_ms = std::chrono::duration<double, std::milli>(soup_end - soup_start).count();
@@ -548,7 +303,7 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     // =========================================================================
 
     if (options.verbose) {
-        std::cerr << "[6/6] Converting soup to mesh (one-time conversion)...\n";
+        logDetail(LogCategory::Preprocess, "[6/6] Converting soup to mesh (one-time conversion)...");
     }
 
     auto mesh_convert_start = std::chrono::high_resolution_clock::now();
@@ -561,8 +316,8 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
         = std::chrono::duration<double, std::milli>(mesh_convert_end - mesh_convert_start).count();
 
     if (options.verbose) {
-        std::cerr << "  Mesh: " << output_mesh.number_of_vertices() << " vertices, " << output_mesh.number_of_faces()
-                  << " faces\n\n";
+        logDetail(LogCategory::Preprocess, "Mesh: " + std::to_string(output_mesh.number_of_vertices()) + " vertices, "
+                                               + std::to_string(output_mesh.number_of_faces()) + " faces");
     }
 
     // =========================================================================
@@ -572,24 +327,25 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     auto mesh_cleanup_start = std::chrono::high_resolution_clock::now();
 
     if (options.verbose) {
-        std::cerr << "[Phase 2] Mesh-Level Cleanup\n";
+        logDetail(LogCategory::Preprocess, "[Phase 2] Mesh-Level Cleanup");
     }
 
     // Remove isolated vertices
     if (options.remove_isolated) {
         if (options.verbose) {
-            std::cerr << "[7/8] Removing isolated vertices...\n";
+            logDetail(LogCategory::Preprocess, "[7/8] Removing isolated vertices...");
         }
         stats.isolated_vertices_removed = PMP::remove_isolated_vertices(output_mesh);
         if (options.verbose) {
-            std::cerr << "  Removed: " << stats.isolated_vertices_removed << " isolated vertices\n\n";
+            logDetail(LogCategory::Preprocess,
+                      "Removed: " + std::to_string(stats.isolated_vertices_removed) + " isolated vertices");
         }
     }
 
     // Keep largest component
     if (options.keep_largest_component) {
         if (options.verbose) {
-            std::cerr << "[8/8] Keeping only largest connected component...\n";
+            logDetail(LogCategory::Preprocess, "[8/8] Keeping only largest connected component...");
         }
 
         auto fccmap                      = output_mesh.add_property_map<face_descriptor, std::size_t>("f:CC").first;
@@ -630,8 +386,10 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
         }
 
         if (options.verbose) {
-            std::cerr << "  Found: " << stats.connected_components_found << " component(s)\n";
-            std::cerr << "  Removed: " << stats.small_components_removed << " small component(s)\n\n";
+            logDetail(LogCategory::Preprocess,
+                      "Found: " + std::to_string(stats.connected_components_found) + " component(s)");
+            logDetail(LogCategory::Preprocess,
+                      "Removed: " + std::to_string(stats.small_components_removed) + " small component(s)");
         }
     }
 
@@ -642,35 +400,44 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     // Collect garbage
     if (output_mesh.has_garbage()) {
         if (options.verbose) {
-            std::cerr << "Collecting garbage (compacting mesh)...\n";
+            logDetail(LogCategory::Preprocess, "Collecting garbage (compacting mesh)...");
         }
         output_mesh.collect_garbage();
     }
 
     // Validate
     if (options.verbose) {
-        std::cerr << "Validating mesh topology...\n";
+        logDetail(LogCategory::Preprocess, "Validating mesh topology...");
     }
     bool is_valid = CGAL::is_valid_polygon_mesh(output_mesh, options.verbose);
     if (!is_valid && options.verbose) {
-        std::cerr << "WARNING: Mesh is not valid after preprocessing!\n";
+        logWarn(LogCategory::Preprocess, "WARNING: Mesh is not valid after preprocessing!");
     }
 
     auto total_end      = std::chrono::high_resolution_clock::now();
     stats.total_time_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
 
     if (options.verbose) {
-        std::cerr << "Final mesh state:\n";
-        std::cerr << "  Vertices: " << output_mesh.number_of_vertices() << "\n";
-        std::cerr << "  Faces: " << output_mesh.number_of_faces() << "\n";
-        std::cerr << "  Valid: " << (is_valid ? "YES" : "NO") << "\n";
-        std::cerr << "  Timing breakdown:\n";
-        std::cerr << "    Soup cleanup: " << std::fixed << std::setprecision(2) << stats.soup_cleanup_time_ms
-                  << " ms\n";
-        std::cerr << "    Soup->Mesh conversion: " << stats.soup_to_mesh_time_ms << " ms\n";
-        std::cerr << "    Mesh cleanup: " << stats.mesh_cleanup_time_ms << " ms\n";
-        std::cerr << "    Total: " << stats.total_time_ms << " ms\n";
-        std::cerr << "========================================\n\n";
+        logDetail(LogCategory::Preprocess,
+                  "Final mesh state: vertices=" + std::to_string(output_mesh.number_of_vertices())
+                      + ", faces=" + std::to_string(output_mesh.number_of_faces())
+                      + ", valid=" + std::string(is_valid ? "YES" : "NO"));
+        {
+            std::ostringstream oss;
+            oss << "Timing breakdown: soup cleanup=" << std::fixed << std::setprecision(2) << stats.soup_cleanup_time_ms
+                << " ms";
+            logDetail(LogCategory::Preprocess, oss.str());
+        }
+        logDetail(LogCategory::Preprocess, "  Duplicates: " + std::to_string(stats.duplicates_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "  Degenerate: " + std::to_string(stats.degenerate_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "  Non-manifold: " + std::to_string(stats.non_manifold_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "  3-face fans: " + std::to_string(stats.face_fans_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "  Orient: " + std::to_string(stats.orient_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess,
+                  "Soup->Mesh conversion: " + std::to_string(stats.soup_to_mesh_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "Mesh cleanup: " + std::to_string(stats.mesh_cleanup_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "Total: " + std::to_string(stats.total_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "========================================\n");
     }
 
     return stats;
@@ -680,32 +447,29 @@ void
 MeshPreprocessor::plyDump(MeshRepair::PolygonSoup& soup, const std::string debug_file, const std::string message,
                           bool verbose)
 {
+    auto debug_points     = soup.points;
+    auto debug_polygons   = soup.polygons;
+    auto debug_validation = validate_polygon_soup_basic(debug_points, debug_polygons);
+
     Mesh debug_mesh;
-    PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);
+    PMP::polygon_soup_to_polygon_mesh(debug_points, debug_polygons, debug_mesh);
     auto resolved = MeshRepair::DebugPath::resolve(debug_file);
     if (CGAL::IO::write_PLY(resolved, debug_mesh, CGAL ::parameters::use_binary_mode(true))) {
         if (verbose) {
-            std::cerr << "  [DEBUG] " << message << " : " << resolved << "\n ";
-            std::cerr << "  [DEBUG]   Mesh: " << debug_mesh.number_of_vertices() << " vertices, "
-                      << debug_mesh.number_of_faces() << " faces\n";
+            logDebug(LogCategory::Preprocess, "[DEBUG] " + message + " : " + resolved);
+            logDebug(LogCategory::Preprocess, "[DEBUG]   Mesh: " + std::to_string(debug_mesh.number_of_vertices())
+                                                  + " vertices, " + std::to_string(debug_mesh.number_of_faces())
+                                                  + " faces");
+            if (debug_validation.polygons_removed_total > 0) {
+                std::ostringstream oss;
+                oss << "[DEBUG]   Validation removed " << debug_validation.polygons_removed_total
+                    << " polygon(s) before dump";
+                logDebug(LogCategory::Preprocess, oss.str());
+            }
         }
     }
 }
 
-int
-preprocess_mesh_c(Mesh* mesh, const PreprocessingOptions* options, PreprocessingStats* out_stats)
-{
-    if (!mesh) {
-        return -1;
-    }
-    PreprocessingOptions opts = options ? *options : PreprocessingOptions();
-    MeshPreprocessor preprocessor(*mesh, opts);
-    PreprocessingStats stats = preprocessor.preprocess();
-    if (out_stats) {
-        *out_stats = stats;
-    }
-    return 0;
-}
 
 int
 preprocess_soup_c(PolygonSoup* soup, Mesh* out_mesh, const PreprocessingOptions* options, PreprocessingStats* out_stats)

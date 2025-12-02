@@ -4,6 +4,7 @@
 #include "../include/c_api.h"
 #include <CGAL/IO/PLY.h>
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
+#include <CGAL/boost/graph/helpers.h>
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -48,7 +49,7 @@ namespace Engine {
                 log_file_ << "=== MeshRepair Engine Log ===" << std::endl;
                 log_file_ << "Engine version: " << Config::VERSION << std::endl;
                 log_file_ << "Log started at: " << std::time(nullptr) << std::endl;
-                log_file_ << "=============================" << std::endl;
+                log_file_ << "=============================\n" << std::endl;
                 log_file_.flush();
             }
         }
@@ -208,8 +209,32 @@ namespace Engine {
             has_mesh_         = true;
             has_soup_         = false;
         } else if (has_mesh_) {
-            MeshPreprocessor preprocessor(mesh_storage_, opts);
-            preprocess_stats_ = preprocessor.preprocess();
+            // Convert mesh back to soup, then run soup-based preprocessing
+            PolygonSoup soup;
+            soup.points.reserve(mesh_storage_.number_of_vertices());
+            soup.polygons.reserve(mesh_storage_.number_of_faces());
+
+            std::map<vertex_descriptor, std::size_t> vmap;
+            std::size_t idx = 0;
+            for (auto v : mesh_storage_.vertices()) {
+                vmap[v] = idx++;
+                soup.points.push_back(mesh_storage_.point(v));
+            }
+
+            for (auto f : mesh_storage_.faces()) {
+                std::vector<std::size_t> poly;
+                for (auto v : CGAL::vertices_around_face(CGAL::halfedge(f, mesh_storage_), mesh_storage_)) {
+                    poly.push_back(vmap[v]);
+                }
+                soup.polygons.push_back(std::move(poly));
+            }
+            soup.load_time_ms = 0.0;
+
+            Mesh output_mesh;
+            preprocess_stats_ = MeshPreprocessor::preprocess_soup(soup, output_mesh, opts);
+            mesh_storage_     = std::move(output_mesh);
+            has_mesh_         = true;
+            has_soup_         = false;
         } else {
             state_ = EngineState::ERROR;
             throw std::runtime_error("No mesh or soup loaded for preprocessing");

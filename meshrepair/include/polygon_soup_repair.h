@@ -68,23 +68,41 @@ public:
             size_t count;
         };
 
-        // OPTIMIZATION: Reusable buffers allocated ONCE outside loop
-        std::vector<uint8_t> polygonRemoveFlags;
-        std::vector<PolygonID> polygons_to_remove;
-        std::vector<uint8_t> vertexCheckNextFlags;
-        std::vector<VertexID> vertices_to_check;
-        std::vector<VertexID> vertices_to_check_next;
+        struct Workspace {
+            std::vector<uint8_t> polygonRemoveFlags;
+            std::vector<PolygonID> polygons_to_remove;
+            std::vector<uint8_t> vertexCheckNextFlags;
+            std::vector<VertexID> vertices_to_check;
+            std::vector<VertexID> vertices_to_check_next;
 
-        // Flat buffer approach to avoid hash map overhead
-        std::vector<size_t> vertex_count;         // Count of polygons per vertex
-        std::vector<size_t> vertex_offsets;       // Start offset for each vertex
-        std::vector<PolygonID> vertex_poly_data;  // Flat array of polygon IDs
+            std::vector<size_t> vertex_count;
+            std::vector<size_t> vertex_offsets;
+            std::vector<PolygonID> vertex_poly_data;
 
-        std::vector<EdgeEntry> edge_entries;
-        std::vector<EdgeSpan> edge_spans;
+            std::vector<EdgeEntry> edge_entries;
+            std::vector<EdgeSpan> edge_spans;
+            std::vector<size_t> edge_count_by_v0;
+            std::vector<size_t> edge_offsets_by_v0;
+        };
+        static thread_local Workspace ws;
+
+        auto& polygonRemoveFlags     = ws.polygonRemoveFlags;
+        auto& polygons_to_remove     = ws.polygons_to_remove;
+        auto& vertexCheckNextFlags   = ws.vertexCheckNextFlags;
+        auto& vertices_to_check      = ws.vertices_to_check;
+        auto& vertices_to_check_next = ws.vertices_to_check_next;
+        auto& vertex_count           = ws.vertex_count;
+        auto& vertex_offsets         = ws.vertex_offsets;
+        auto& vertex_poly_data       = ws.vertex_poly_data;
+        auto& edge_entries           = ws.edge_entries;
+        auto& edge_spans             = ws.edge_spans;
+        auto& edge_count_by_v0       = ws.edge_count_by_v0;
+        auto& edge_offsets_by_v0     = ws.edge_offsets_by_v0;
+
         edge_entries.reserve(polygons.size() * 3);
-        std::vector<size_t> edge_count_by_v0;
-        std::vector<size_t> edge_offsets_by_v0;
+        polygons_to_remove.clear();
+        vertices_to_check.clear();
+        vertices_to_check_next.clear();
 
         auto resetSizedVector = [](std::vector<size_t>& vec, size_t size) {
             if (vec.size() < size) {
@@ -188,16 +206,34 @@ public:
 
             // Sort edges within each v0 bucket by v1 (and poly as tie-breaker)
             for (size_t v0 = 0; v0 <= max_vertex; ++v0) {
-                size_t start = edge_offsets_by_v0[v0];
-                size_t end   = edge_offsets_by_v0[v0 + 1];
-                if (end - start > 1) {
-                    std::sort(edge_entries.begin() + start, edge_entries.begin() + end,
-                              [](const EdgeEntry& a, const EdgeEntry& b) {
-                                  if (a.v1 == b.v1) {
-                                      return a.poly_id < b.poly_id;
-                                  }
-                                  return a.v1 < b.v1;
-                              });
+                size_t start             = edge_offsets_by_v0[v0];
+                size_t end               = edge_offsets_by_v0[v0 + 1];
+                const size_t bucket_size = end - start;
+                if (bucket_size > 1) {
+                    if (bucket_size <= 8) {
+                        // Insertion sort for tiny buckets
+                        for (size_t i = start + 1; i < end; ++i) {
+                            EdgeEntry key = edge_entries[i];
+                            size_t j      = i;
+                            while (j > start) {
+                                const auto& prev = edge_entries[j - 1];
+                                if (prev.v1 < key.v1 || (prev.v1 == key.v1 && prev.poly_id <= key.poly_id)) {
+                                    break;
+                                }
+                                edge_entries[j] = prev;
+                                --j;
+                            }
+                            edge_entries[j] = key;
+                        }
+                    } else {
+                        std::sort(edge_entries.begin() + start, edge_entries.begin() + end,
+                                  [](const EdgeEntry& a, const EdgeEntry& b) {
+                                      if (a.v1 == b.v1) {
+                                          return a.poly_id < b.poly_id;
+                                      }
+                                      return a.v1 < b.v1;
+                                  });
+                    }
                 }
             }
 
@@ -220,6 +256,7 @@ public:
             if (polygonRemoveFlags.size() < polygons.size()) {
                 polygonRemoveFlags.resize(polygons.size(), 0);
             }
+            std::fill(polygonRemoveFlags.begin(), polygonRemoveFlags.begin() + polygons.size(), 0);
             polygons_to_remove.clear();
 
             auto markPolygonForRemoval = [&](PolygonID id) {
@@ -622,6 +659,7 @@ private:
 
         constexpr size_t STACK_CAPACITY          = 16;
         constexpr size_t STACK_NEIGHBOR_CAPACITY = STACK_CAPACITY * 4;  // 2 neighbors per polygon
+        constexpr size_t SMALL_NEIGHBOR_CAPACITY = 64;                  // sorted small-buffer path (neighbor,poly)
         const size_t invalid                     = std::numeric_limits<size_t>::max();
         const bool use_stack                     = num_polys <= STACK_CAPACITY;
 
@@ -641,6 +679,7 @@ private:
         size_t neighbor_keys_stack[STACK_NEIGHBOR_CAPACITY];
         size_t neighbor_values_stack[STACK_NEIGHBOR_CAPACITY];
         uint8_t neighbor_used_stack[STACK_NEIGHBOR_CAPACITY];
+        std::pair<size_t, size_t> neighbor_pairs_stack[SMALL_NEIGHBOR_CAPACITY];
 
         size_t* parents;
         uint8_t* ranks;
@@ -733,7 +772,7 @@ private:
         const size_t mask   = neighbor_capacity - 1;
         bool has_connection = false;
 
-        auto connectNeighbor = [&](size_t neighbor, size_t poly_idx) {
+        auto connectNeighborHash = [&](size_t neighbor, size_t poly_idx) {
             size_t slot = hashNeighbor(neighbor) & mask;
             while (true) {
                 if (use_stack) {
@@ -772,6 +811,27 @@ private:
             }
         };
 
+        auto find_vertex_pos = [&](const auto& polygon) -> size_t {
+            const size_t n = polygon.size();
+            if (n == 3) {
+                if (polygon[0] == vertex)
+                    return 0;
+                if (polygon[1] == vertex)
+                    return 1;
+                if (polygon[2] == vertex)
+                    return 2;
+                return n;
+            }
+            for (size_t i = 0; i < n; ++i) {
+                if (polygon[i] == vertex)
+                    return i;
+            }
+            return n;
+        };
+
+        const bool use_sorted_neighbors = (num_polys * 2) <= SMALL_NEIGHBOR_CAPACITY;
+        size_t neighbor_pair_count      = 0;
+
         for (size_t poly_idx = 0; poly_idx < num_polys; ++poly_idx) {
             const auto& polygon    = polygons[incident_polys[poly_idx]];
             const size_t num_verts = polygon.size();
@@ -779,14 +839,7 @@ private:
                 return false;
             }
 
-            size_t position = num_verts;
-            for (size_t i = 0; i < num_verts; ++i) {
-                if (polygon[i] == vertex) {
-                    position = i;
-                    break;
-                }
-            }
-
+            size_t position = find_vertex_pos(polygon);
             if (position == num_verts) {
                 return false;
             }
@@ -794,8 +847,44 @@ private:
             size_t prev_v = polygon[(position + num_verts - 1) % num_verts];
             size_t next_v = polygon[(position + 1) % num_verts];
 
-            connectNeighbor(prev_v, poly_idx);
-            connectNeighbor(next_v, poly_idx);
+            if (use_sorted_neighbors) {
+                if (neighbor_pair_count + 2 <= SMALL_NEIGHBOR_CAPACITY) {
+                    neighbor_pairs_stack[neighbor_pair_count++] = { prev_v, poly_idx };
+                    neighbor_pairs_stack[neighbor_pair_count++] = { next_v, poly_idx };
+                }
+            } else {
+                connectNeighborHash(prev_v, poly_idx);
+                connectNeighborHash(next_v, poly_idx);
+            }
+        }
+
+        if (use_sorted_neighbors) {
+            auto begin = neighbor_pairs_stack;
+            auto end   = neighbor_pairs_stack + neighbor_pair_count;
+            if (neighbor_pair_count > 1) {
+                std::sort(begin, end);  // std::pair lexicographic order
+            }
+
+            size_t i = 0;
+            while (i < neighbor_pair_count) {
+                size_t j = i + 1;
+                while (j < neighbor_pair_count && neighbor_pairs_stack[j].first == neighbor_pairs_stack[i].first) {
+                    ++j;
+                }
+                if (j - i > 1) {
+                    // Union all polys sharing this neighbor
+                    size_t base_poly = neighbor_pairs_stack[i].second;
+                    for (size_t k = i + 1; k < j; ++k) {
+                        unite(base_poly, neighbor_pairs_stack[k].second);
+                    }
+                    has_connection = true;
+                }
+                i = j;
+            }
+
+            if (!has_connection) {
+                return false;
+            }
         }
 
         if (!has_connection) {

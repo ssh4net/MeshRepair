@@ -5,9 +5,15 @@
 #include "engine/engine_dispatch.h"
 #include "engine/socket_stream.h"
 #include "include/help_printer.h"
-#include <iostream>
+#include "include/logger.h"
 #include <cstring>
 #include <memory>
+#include <sstream>
+#include <string>
+
+#if defined(MESHREPAIR_USE_SPDLOG)
+#    include <spdlog/spdlog.h>
+#endif
 
 #ifdef _WIN32
 #    include <io.h>
@@ -20,6 +26,10 @@ using namespace MeshRepair::Engine;
 int
 engine_main(int argc, char** argv)
 {
+    LoggerConfig log_cfg;
+    log_cfg.useStderr = true;
+    initLogger(log_cfg);
+
     bool socket_mode = false;
     // Check for engine-specific options
     int verbosity   = 1;  // Default: info level (stats)
@@ -33,7 +43,7 @@ engine_main(int argc, char** argv)
                 verbosity = std::atoi(argv[i + 1]);
                 ++i;  // Skip the level argument
                 if (verbosity < 0 || verbosity > 4) {
-                    std::cerr << "ERROR: Verbosity level must be 0-4\n";
+                    logError(LogCategory::Engine, "ERROR: Verbosity level must be 0-4");
                     return 1;
                 }
             } else {
@@ -48,20 +58,20 @@ engine_main(int argc, char** argv)
                 socket_port = std::atoi(argv[i + 1]);
                 ++i;  // Skip port argument
                 if (socket_port <= 0 || socket_port > 65535) {
-                    std::cerr << "ERROR: Invalid port number: " << argv[i] << "\n";
-                    std::cerr << "Port must be between 1 and 65535\n";
+                    logError(LogCategory::Engine, std::string("ERROR: Invalid port number: ") + argv[i]);
+                    logError(LogCategory::Engine, "Port must be between 1 and 65535");
                     return 1;
                 }
             } else {
-                std::cerr << "ERROR: --socket requires a port number\n";
-                std::cerr << "Usage: meshrepair --socket PORT\n";
+                logError(LogCategory::Engine, "ERROR: --socket requires a port number");
+                logInfo(LogCategory::Engine, "Usage: meshrepair --socket PORT");
                 return 1;
             }
         } else if ((std::strcmp(argv[i], "--temp-dir") == 0 || std::strcmp(argv[i], "--temp") == 0) && i + 1 < argc) {
             temp_dir = argv[i + 1];
             ++i;
         } else if (std::strcmp(argv[i], "--temp-dir") == 0 || std::strcmp(argv[i], "--temp") == 0) {
-            std::cerr << "ERROR: --temp-dir requires a path argument\n";
+            logError(LogCategory::Engine, "ERROR: --temp-dir requires a path argument");
             return 1;
         }
         // Skip --engine flag itself
@@ -75,6 +85,9 @@ engine_main(int argc, char** argv)
     bool show_stats = (verbosity >= 1);
     bool verbose    = (verbosity >= 2);
 
+    log_cfg.minLevel = logLevelFromVerbosity(verbosity);
+    setLogLevel(log_cfg.minLevel);
+
     socket_mode = (socket_port > 0);
 
     if (!temp_dir.empty()) {
@@ -85,45 +98,45 @@ engine_main(int argc, char** argv)
     if (socket_mode) {
         // Initialize sockets (Windows only)
         if (!SocketServer::init_sockets()) {
-            std::cerr << "ERROR: Failed to initialize socket library\n";
+            logError(LogCategory::Engine, "ERROR: Failed to initialize socket library");
             return 1;
         }
 
-        std::cerr << "MeshRepair v" << Config::VERSION << " - Engine Mode (Socket)\n";
-        std::cerr << "Starting socket server on port " << socket_port << "...\n";
+        logInfo(LogCategory::Engine, "MeshRepair v" + std::string(Config::VERSION) + " - Engine Mode (Socket)");
+        logInfo(LogCategory::Engine, "Starting socket server on port " + std::to_string(socket_port) + "...");
 
         try {
             // Create socket server
             SocketServer server;
             if (!server.listen(socket_port)) {
-                std::cerr << "ERROR: Failed to start socket server on port " << socket_port << "\n";
-                std::cerr << "Make sure the port is not already in use.\n";
+                logError(LogCategory::Engine,
+                         "ERROR: Failed to start socket server on port " + std::to_string(socket_port));
+                logError(LogCategory::Engine, "Make sure the port is not already in use.");
                 SocketServer::cleanup_sockets();
                 return 1;
             }
 
-            std::cerr << "Server listening on port " << socket_port << "\n";
-            std::cerr << "Press Ctrl+C to stop the server\n\n";
+            logInfo(LogCategory::Engine, "Server listening on port " + std::to_string(socket_port));
+            logInfo(LogCategory::Engine, "Press Ctrl+C to stop the server");
 
             // Keep accepting connections until manually stopped
             while (true) {
-                std::cerr << "Waiting for addon connection...\n";
+                logInfo(LogCategory::Engine, "Waiting for addon connection...");
 
                 // Accept client connection
                 socket_t client_socket = server.accept_client();
                 if (client_socket == INVALID_SOCKET) {
-                    std::cerr << "ERROR: Failed to accept client connection\n";
+                    logError(LogCategory::Engine, "ERROR: Failed to accept client connection");
                     continue;  // Try again
                 }
 
-                std::cerr << "Client connected!\n";
+                logInfo(LogCategory::Engine, "Client connected!");
                 if (verbose) {
-                    std::cerr << "Verbose mode enabled\n";
-                    std::cerr << "Protocol: Binary-framed JSON messages\n";
-                    std::cerr << "\n";
+                    logInfo(LogCategory::Engine, "Verbose mode enabled");
+                    logInfo(LogCategory::Engine, "Protocol: Binary-framed JSON messages");
                 }
                 if (show_stats) {
-                    std::cerr << "Stats mode enabled\n";
+                    logInfo(LogCategory::Engine, "Stats mode enabled");
                 }
 
                 // Create socket streams
@@ -161,7 +174,7 @@ engine_main(int argc, char** argv)
                 }
 
                 if (verbose) {
-                    std::cerr << "Session ended\n\n";
+                    logInfo(LogCategory::Engine, "Session ended");
                 }
 
                 // Close client socket
@@ -176,7 +189,7 @@ engine_main(int argc, char** argv)
 
             return 0;
         } catch (const std::exception& ex) {
-            std::cerr << "FATAL ERROR in socket mode: " << ex.what() << "\n";
+            logError(LogCategory::Engine, std::string("FATAL ERROR in socket mode: ") + ex.what());
             SocketServer::cleanup_sockets();
             return 1;
         }
@@ -193,20 +206,31 @@ engine_main(int argc, char** argv)
     // Pipe mode (default)
     // Write startup messages to stderr AFTER binary mode is set
     if (verbose) {
-        std::cerr << "MeshRepair v" << Config::VERSION << "\n";
-        std::cerr << "Built on " << Config::BUILD_DATE << " at " << Config::BUILD_TIME << "\n";
-        std::cerr << "Engine Mode (Pipe)\n\n";
-        std::cerr << "Starting IPC engine...\n";
-        std::cerr << "Protocol: Binary-framed JSON messages\n";
-        std::cerr << "Input: stdin (binary) | Output: stdout (binary) | Logs: stderr\n\n";
-        std::cerr << "Batch mode: Engine will process all commands from stdin until EOF.\n";
-        std::cerr << "This pattern avoids Windows pipe EOF issues by sending all commands\n";
-        std::cerr << "upfront, closing stdin to signal end of input.\n\n";
-        std::cerr.flush();  // Flush stderr before first stdout write
+        std::ostringstream banner;
+        banner << "MeshRepair v" << Config::VERSION << "\n";
+        banner << "Built on " << Config::BUILD_DATE << " at " << Config::BUILD_TIME << " (" << MESHREPAIR_BUILD_CONFIG
+               << ")\n";
+        banner << "Engine Mode (Pipe)\n\n";
+        banner << "Starting IPC engine...\n";
+        banner << "Protocol: Binary-framed JSON messages\n";
+        banner << "Input: stdin (binary) | Output: stdout (binary) | Logs: stderr\n\n";
+        banner << "Batch mode: Engine will process all commands from stdin until EOF.\n";
+        banner << "This pattern avoids Windows pipe EOF issues by sending all commands\n";
+        banner << "upfront, closing stdin to signal end of input.";
+        logInfo(LogCategory::Engine, banner.str());
+#if defined(MESHREPAIR_USE_SPDLOG)
+        if (auto logger = spdlog::default_logger()) {
+            logger->flush();
+        }
+#endif
     }
     if (show_stats) {
-        std::cerr << "Stats mode enabled\n";
-        std::cerr.flush();  // Flush stderr before first stdout write
+        logInfo(LogCategory::Engine, "Stats mode enabled");
+#if defined(MESHREPAIR_USE_SPDLOG)
+        if (auto logger = spdlog::default_logger()) {
+            logger->flush();
+        }
+#endif
     }
 
     // NOTE: We do NOT untie cin/cout or disable sync_with_stdio because:
@@ -221,7 +245,7 @@ engine_main(int argc, char** argv)
     try {
         // Procedural command processing loop using dispatcher
         if (verbose) {
-            std::cerr << "[Engine] Using procedural dispatcher\n";
+            logInfo(LogCategory::Engine, "[Engine] Using procedural dispatcher");
         }
 
         EngineWrapper engine;
@@ -252,9 +276,7 @@ engine_main(int argc, char** argv)
         }
         return 0;
     } catch (const std::exception& ex) {
-        if (socket_mode) {
-            std::cerr << "FATAL ERROR in pipe mode: " << ex.what() << "\n";
-        }
+        logError(LogCategory::Engine, std::string("FATAL ERROR in pipe mode: ") + ex.what());
         return 1;
     }
 }

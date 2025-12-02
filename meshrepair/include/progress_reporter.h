@@ -2,7 +2,6 @@
 
 #include <string>
 #include <chrono>
-#include <iostream>
 
 namespace MeshRepair {
 

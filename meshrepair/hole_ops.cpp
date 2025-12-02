@@ -3,8 +3,9 @@
 #include <CGAL/Polygon_mesh_processing/triangulate_hole.h>
 #include <CGAL/bounding_box.h>
 #include <chrono>
-#include <iostream>
+#include <string>
 #include <unordered_set>
+#include "include/logger.h"
 
 namespace PMP = CGAL::Polygon_mesh_processing;
 
@@ -36,9 +37,9 @@ detect_all_holes_ctx(const HoleDetectorCtx& ctx, std::vector<HoleInfo>& out_hole
 
     if (ctx.verbose) {
         if (!out_holes.empty()) {
-            std::cerr << "Detected " << out_holes.size() << " hole(s)\n";
+            logDetail(LogCategory::Fill, "Detected " + std::to_string(out_holes.size()) + " hole(s)");
         } else {
-            std::cerr << "No holes detected. Mesh is closed.\n";
+            logDetail(LogCategory::Fill, "No holes detected. Mesh is closed.");
         }
     }
 
@@ -138,8 +139,9 @@ namespace {
             }
             if (all_boundary) {
                 if (options.verbose) {
-                    std::cerr << "    Skipping hole (selection boundary): all " << hole.boundary_size
-                              << " vertices are on selection boundary\n";
+                    logDetail(LogCategory::Fill, "Skipping hole (selection boundary): all "
+                                                     + std::to_string(hole.boundary_size)
+                                                     + " vertices are on selection boundary");
                 }
                 return true;
             }
@@ -173,7 +175,8 @@ fill_hole_ctx(HoleFillerCtx* ctx, const HoleInfo& hole)
 
     if (should_skip_hole(*ctx, hole)) {
         if (options.verbose) {
-            std::cerr << "    Skipping hole: " << hole.boundary_size << " boundary vertices (guard/limits)\n";
+            logDetail(LogCategory::Fill,
+                      "Skipping hole: " + std::to_string(hole.boundary_size) + " boundary vertices (guard/limits)");
         }
         stats.filled_successfully = false;
         return stats;
@@ -202,12 +205,12 @@ fill_hole_ctx(HoleFillerCtx* ctx, const HoleInfo& hole)
             stats.fairing_succeeded   = fairing_success;
 
             if (options.verbose) {
-                std::cerr << "    Filled: " << stats.num_faces_added << " faces, " << stats.num_vertices_added
-                          << " vertices added";
+                std::string msg = "Filled: " + std::to_string(stats.num_faces_added) + " faces, "
+                                  + std::to_string(stats.num_vertices_added) + " vertices added";
                 if (!fairing_success) {
-                    std::cerr << " [FAIRING FAILED]";
+                    msg += " [FAIRING FAILED]";
                 }
-                std::cerr << "\n";
+                logDetail(LogCategory::Fill, msg);
             }
         } else {
             stats.filled_successfully = false;
@@ -215,7 +218,7 @@ fill_hole_ctx(HoleFillerCtx* ctx, const HoleInfo& hole)
             stats.error_message       = "CGAL triangulation failed (possibly degenerate or self-intersecting boundary)";
 
             if (options.verbose) {
-                std::cerr << "    Failed to triangulate hole (boundary may be degenerate)\n";
+                logDetail(LogCategory::Fill, "Failed to triangulate hole (boundary may be degenerate)");
             }
         }
     } catch (const std::exception& e) {
@@ -224,7 +227,7 @@ fill_hole_ctx(HoleFillerCtx* ctx, const HoleInfo& hole)
         stats.error_message       = e.what();
 
         if (options.verbose) {
-            std::cerr << "    Exception during hole filling: " << e.what() << "\n";
+            logDetail(LogCategory::Fill, std::string("Exception during hole filling: ") + e.what());
         }
     }
 
@@ -253,7 +256,7 @@ fill_all_holes_ctx(HoleFillerCtx* ctx, const std::vector<HoleInfo>& holes)
 
     if (holes.empty()) {
         if (options.verbose) {
-            std::cerr << "No holes to fill.\n";
+            logDetail(LogCategory::Fill, "No holes to fill.");
         }
         mesh_stats.final_vertices = mesh_stats.original_vertices;
         mesh_stats.final_faces    = mesh_stats.original_faces;
@@ -261,13 +264,13 @@ fill_all_holes_ctx(HoleFillerCtx* ctx, const std::vector<HoleInfo>& holes)
     }
 
     if (options.verbose) {
-        std::cerr << "\nFilling " << holes.size() << " hole(s)...\n";
+        logDetail(LogCategory::Fill, "Filling " + std::to_string(holes.size()) + " hole(s)...");
     }
 
     for (size_t i = 0; i < holes.size(); ++i) {
         if (options.verbose) {
-            std::cerr << "  Hole " << (i + 1) << "/" << holes.size() << " (" << holes[i].boundary_size
-                      << " boundary vertices):\n";
+            logDetail(LogCategory::Fill, "Hole " + std::to_string(i + 1) + "/" + std::to_string(holes.size()) + " ("
+                                             + std::to_string(holes[i].boundary_size) + " boundary vertices)");
         }
 
         HoleStatistics hole_stats = fill_hole_ctx(ctx, holes[i]);
@@ -285,19 +288,20 @@ fill_all_holes_ctx(HoleFillerCtx* ctx, const std::vector<HoleInfo>& holes)
     }
 
     auto end_time            = std::chrono::high_resolution_clock::now();
-    mesh_stats.total_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    mesh_stats.fill_time_ms  = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    mesh_stats.total_time_ms = mesh_stats.fill_time_ms;
 
     mesh_stats.final_vertices = mesh.number_of_vertices();
     mesh_stats.final_faces    = mesh.number_of_faces();
 
     if (options.verbose) {
-        std::cerr << "\n=== Hole Filling Summary ===\n";
-        std::cerr << "  Filled successfully: " << mesh_stats.num_holes_filled << "\n";
-        std::cerr << "  Failed: " << mesh_stats.num_holes_failed << "\n";
-        std::cerr << "  Skipped (too large): " << mesh_stats.num_holes_skipped << "\n";
-        std::cerr << "  Faces added: " << mesh_stats_total_faces_added(mesh_stats) << "\n";
-        std::cerr << "  Vertices added: " << mesh_stats_total_vertices_added(mesh_stats) << "\n";
-        std::cerr << "  Total time: " << mesh_stats.total_time_ms << " ms\n";
+        logDetail(LogCategory::Fill, "=== Hole Filling Summary ===");
+        logDetail(LogCategory::Fill, "Filled successfully: " + std::to_string(mesh_stats.num_holes_filled));
+        logDetail(LogCategory::Fill, "Failed: " + std::to_string(mesh_stats.num_holes_failed));
+        logDetail(LogCategory::Fill, "Skipped (too large): " + std::to_string(mesh_stats.num_holes_skipped));
+        logDetail(LogCategory::Fill, "Faces added: " + std::to_string(mesh_stats_total_faces_added(mesh_stats)));
+        logDetail(LogCategory::Fill, "Vertices added: " + std::to_string(mesh_stats_total_vertices_added(mesh_stats)));
+        logDetail(LogCategory::Fill, "Total time: " + std::to_string(mesh_stats.total_time_ms) + " ms");
     }
 
     return mesh_stats;

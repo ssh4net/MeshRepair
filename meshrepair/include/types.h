@@ -48,8 +48,29 @@ struct MeshStatistics {
     size_t num_holes_failed   = 0;
     size_t num_holes_skipped  = 0;
 
-    // Timing
-    double total_time_ms = 0.0;
+    // Timing (ms)
+    double detection_time_ms    = 0.0;
+    double partition_time_ms    = 0.0;
+    double neighborhood_time_ms = 0.0;
+    double extraction_time_ms   = 0.0;
+    double fill_time_ms         = 0.0;
+    double merge_time_ms        = 0.0;
+    double merge_dedup_ms       = 0.0;
+    double merge_copy_base_ms   = 0.0;
+    double merge_append_ms      = 0.0;
+    double merge_repair_ms      = 0.0;
+    double merge_orient_ms      = 0.0;
+    double merge_convert_ms     = 0.0;
+    double cleanup_time_ms      = 0.0;
+    double total_time_ms        = 0.0;
+
+    // Merge validation stats (partition merge soup validation)
+    size_t merge_validation_removed          = 0;
+    size_t merge_validation_out_of_bounds    = 0;
+    size_t merge_validation_invalid_cycle    = 0;
+    size_t merge_validation_edge_orientation = 0;
+    size_t merge_validation_non_manifold     = 0;
+    size_t merge_validation_passes           = 0;
 
     // Detailed per-hole statistics
     std::vector<HoleStatistics> hole_details;

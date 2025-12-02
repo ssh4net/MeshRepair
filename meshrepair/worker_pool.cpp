@@ -1,6 +1,8 @@
 #include "worker_pool.h"
+#include "include/logger.h"
 #include <algorithm>
-#include <iostream>
+#include <sstream>
+#include <string>
 
 namespace MeshRepair {
 
@@ -30,12 +32,13 @@ namespace {
 
     void print_config(const ThreadingConfig& cfg)
     {
-        std::cerr << "Threading configuration:\n";
-        std::cerr << "  Hardware cores: " << cfg.hw_cores << "\n";
-        std::cerr << "  Worker threads: " << cfg.num_threads << "\n";
-        std::cerr << "  Queue size: " << cfg.queue_size << " holes\n";
-        std::cerr << "  Pipeline split: " << cfg.detection_threads << " detection + " << cfg.filling_threads
-                  << " filling\n\n";
+        std::ostringstream msg;
+        msg << "Threading configuration:\n";
+        msg << "  Hardware cores: " << cfg.hw_cores << "\n";
+        msg << "  Worker threads: " << cfg.num_threads << "\n";
+        msg << "  Queue size: " << cfg.queue_size << " holes\n";
+        msg << "  Pipeline split: " << cfg.detection_threads << " detection + " << cfg.filling_threads << " filling";
+        logInfo(LogCategory::Fill, msg.str());
     }
 
 }  // namespace
@@ -58,7 +61,8 @@ thread_manager_enter_detection(ThreadManager& mgr)
     mgr.filling_pool.resize(0);
 
     if (mgr.config.verbose) {
-        std::cerr << "[Threading] Detection phase: " << mgr.config.num_threads << " thread(s)\n";
+        logInfo(LogCategory::Fill,
+                "[Threading] Detection phase: " + std::to_string(mgr.config.num_threads) + " thread(s)");
     }
 }
 
@@ -69,8 +73,9 @@ thread_manager_enter_pipeline(ThreadManager& mgr)
     mgr.filling_pool.resize(mgr.config.filling_threads);
 
     if (mgr.config.verbose) {
-        std::cerr << "[Threading] Pipeline phase: " << mgr.config.detection_threads << " detection + "
-                  << mgr.config.filling_threads << " filling thread(s)\n";
+        logInfo(LogCategory::Fill, "[Threading] Pipeline phase: " + std::to_string(mgr.config.detection_threads)
+                                       + " detection + " + std::to_string(mgr.config.filling_threads)
+                                       + " filling thread(s)");
     }
 }
 
@@ -81,7 +86,8 @@ thread_manager_enter_filling(ThreadManager& mgr)
     mgr.filling_pool.resize(mgr.config.num_threads);
 
     if (mgr.config.verbose) {
-        std::cerr << "[Threading] Filling phase: " << mgr.config.num_threads << " thread(s)\n";
+        logInfo(LogCategory::Fill,
+                "[Threading] Filling phase: " + std::to_string(mgr.config.num_threads) + " thread(s)");
     }
 }
 

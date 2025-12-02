@@ -14,8 +14,12 @@ project(MeshRepair
     LANGUAGES CXX
 )
 
-# C++17 required
-set(CMAKE_CXX_STANDARD 17)
+# Require at least C++20, but allow user override via CMAKE_CXX_STANDARD
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 20)
+elseif(CMAKE_CXX_STANDARD LESS 20)
+    set(CMAKE_CXX_STANDARD 20)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -54,10 +58,13 @@ if(CMAKE_PREFIX_PATH)
     endforeach()
     list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
 endif()
+set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}" CACHE PATH "Search paths for dependencies" FORCE)
 
 # Options
 option(BUILD_TESTS "Build test suite" ON)
 option(ENABLE_OPENMP "Enable OpenMP for parallel processing" ON)
+option(ENABLE_TBB "Enable oneTBB for parallel processing" ON)
+option(MESHREPAIR_USE_SPDLOG "Use spdlog for logging (if available)" ON)
 
 # Platform-specific settings
 if(WIN32)
@@ -127,6 +134,7 @@ if(NOT Boost_FOUND)
 endif()
 
 # Optional: Find OpenMP
+set(OpenMP_CXX_FOUND FALSE)
 if(ENABLE_OPENMP)
     find_package(OpenMP)
     if(OpenMP_CXX_FOUND)
@@ -134,6 +142,38 @@ if(ENABLE_OPENMP)
     else()
         message(STATUS "OpenMP not found. Parallel processing disabled.")
     endif()
+endif()
+
+# Optional: Find oneTBB
+set(MESHREPAIR_HAS_TBB OFF)
+if(ENABLE_TBB)
+    # Prefer config packages shipped with oneTBB, fall back to module search
+    find_package(TBB QUIET CONFIG)
+    if(NOT TBB_FOUND)
+        find_package(TBB QUIET)
+    endif()
+
+    if(TBB_FOUND)
+        set(MESHREPAIR_HAS_TBB ON)
+        message(STATUS "oneTBB: found")
+    else()
+        message(STATUS "oneTBB: NOT found - CGAL parallelism will stay serial")
+    endif()
+else()
+    message(STATUS "oneTBB: disabled via ENABLE_TBB=OFF")
+endif()
+
+set(MESHREPAIR_HAS_SPDLOG OFF)
+if(MESHREPAIR_USE_SPDLOG)
+    find_package(spdlog QUIET CONFIG)
+    if(spdlog_FOUND)
+        set(MESHREPAIR_HAS_SPDLOG ON)
+        message(STATUS "spdlog: found (${spdlog_DIR})")
+    else()
+        message(STATUS "spdlog: NOT found - falling back to std::ostream logger")
+    endif()
+else()
+    message(STATUS "spdlog: disabled via MESHREPAIR_USE_SPDLOG=OFF")
 endif()
 
 # Threading support (required for threadpool)
@@ -218,6 +258,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/cli_main.cpp
     meshrepair/engine_main.cpp
     meshrepair/debug_path.cpp
+    meshrepair/logger.cpp
     meshrepair/engine/protocol.cpp
     meshrepair/engine/engine_wrapper.cpp
     meshrepair/engine/engine_dispatch.cpp
@@ -231,6 +272,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/worker_pool.cpp
     meshrepair/pipeline_ops.cpp
     meshrepair/submesh_ops.cpp
+    meshrepair/polygon_soup_validation.cpp
 )
 
 # Header files
@@ -250,6 +292,7 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/progress_reporter.h
     meshrepair/include/mesh_preprocessor.h
     meshrepair/include/polygon_soup_repair.h
+    meshrepair/include/polygon_soup_validation.h
     meshrepair/include/worker_pool.h
     meshrepair/include/pipeline_ops.h
     meshrepair/include/parallel_utils.h
@@ -258,6 +301,7 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/hole_ops.h
     meshrepair/include/thread_safe_cout.h
     meshrepair/include/debug_path.h
+    meshrepair/include/logger.h
 )
 
 # Main executable
@@ -268,50 +312,108 @@ add_executable(meshrepair
 
 # Link libraries
 target_link_libraries(meshrepair
-    CGAL::CGAL
-    Eigen3::Eigen
-    Threads::Threads
-    nlohmann_json::nlohmann_json
+    PRIVATE
+        CGAL::CGAL
+        Eigen3::Eigen
+        Threads::Threads
+        nlohmann_json::nlohmann_json
 )
 
+if(MESHREPAIR_HAS_SPDLOG)
+    target_link_libraries(meshrepair PRIVATE spdlog::spdlog)
+    target_compile_definitions(meshrepair PRIVATE MESHREPAIR_USE_SPDLOG SPDLOG_USE_STD_FORMAT)
+endif()
+
 if(RapidOBJ_FOUND)
-    target_link_libraries(meshrepair RapidOBJ::RapidOBJ)
+    target_link_libraries(meshrepair PRIVATE RapidOBJ::RapidOBJ)
 endif()
 
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(meshrepair OpenMP::OpenMP_CXX)
+    target_link_libraries(meshrepair PRIVATE OpenMP::OpenMP_CXX)
     target_compile_definitions(meshrepair PRIVATE USE_OPENMP)
 endif()
 
+if(MESHREPAIR_HAS_TBB)
+    target_link_libraries(meshrepair PRIVATE TBB::tbb)
+    target_compile_definitions(meshrepair PRIVATE CGAL_LINKED_WITH_TBB)
+endif()
+
+# Optional performance toggles
+option(MESHREPAIR_ENABLE_NATIVE_ARCH "Enable -march=native (/arch:AVX2 on MSVC) in Release builds" ON)
+option(MESHREPAIR_ENABLE_LTO "Enable link-time optimization in Release builds" ON)
+
 # Windows: Link Winsock2 for socket support
 if(WIN32)
-    target_link_libraries(meshrepair ws2_32)
+    target_link_libraries(meshrepair PRIVATE ws2_32)
 endif()
 
 # Compiler-specific optimizations (configuration-aware for multi-config generators)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # GCC/Clang flags
+    set(native_flag $<$<AND:$<CONFIG:Release>,$<BOOL:${MESHREPAIR_ENABLE_NATIVE_ARCH}>>:-march=native>)
+    set(lto_flag $<$<AND:$<CONFIG:Release>,$<BOOL:${MESHREPAIR_ENABLE_LTO}>>:-flto>)
+
     target_compile_options(meshrepair PRIVATE
         -Wall
         -Wextra
         $<$<CONFIG:Release>:-O3>
-        $<$<CONFIG:Release>:-march=native>
+        ${native_flag}
+        ${lto_flag}
         $<$<CONFIG:Debug>:-g>
         $<$<CONFIG:Debug>:-Wpedantic>
     )
+
+    if(MESHREPAIR_ENABLE_LTO)
+        target_link_options(meshrepair PRIVATE ${lto_flag})
+    endif()
 elseif(MSVC)
-    # MSVC flags (supports multi-config generators like Visual Studio)
+    # MSVC/clang-cl flags (supports multi-config generators like Visual Studio)
+    set(is_clang_cl FALSE)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        set(is_clang_cl TRUE)
+    endif()
+
+    # Remove MSVC-only flags that clang-cl/linkers do not understand (/GL, /GT)
+    if(is_clang_cl)
+        foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELWITHDEBINFO
+                CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_DEBUG)
+            if(DEFINED ${flag_var})
+                string(REPLACE "/GL" "" ${flag_var} "${${flag_var}}")
+                string(REPLACE "/GT" "" ${flag_var} "${${flag_var}}")
+                set(${flag_var} "${${flag_var}}" CACHE STRING "" FORCE)
+            endif()
+        endforeach()
+    endif()
+
+    set(msvc_native_flag "")
+    if(MESHREPAIR_ENABLE_NATIVE_ARCH AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        set(msvc_native_flag $<$<CONFIG:Release>:/arch:AVX2>)
+    endif()
+
+    if(is_clang_cl)
+        set(msvc_lto_flag $<$<AND:$<CONFIG:Release>,$<BOOL:${MESHREPAIR_ENABLE_LTO}>>:-flto>)
+    else()
+        set(msvc_lto_flag $<$<AND:$<CONFIG:Release>,$<BOOL:${MESHREPAIR_ENABLE_LTO}>>:/GL>)
+    endif()
+
     target_compile_options(meshrepair PRIVATE
         /W4
         $<$<CONFIG:Release>:/O2>
-        $<$<CONFIG:Release>:/GL>
+        ${msvc_lto_flag}
+        ${msvc_native_flag}
         $<$<CONFIG:Debug>:/Zi>
     )
 
     # Link-time code generation for Release
-    target_link_options(meshrepair PRIVATE
-        $<$<CONFIG:Release>:/LTCG>
-    )
+    if(MESHREPAIR_ENABLE_LTO)
+        if(is_clang_cl)
+            target_link_options(meshrepair PRIVATE ${msvc_lto_flag})
+        else()
+            target_link_options(meshrepair PRIVATE
+                $<$<CONFIG:Release>:/LTCG>
+            )
+        endif()
+    endif()
 
     # Apply debug postfix
     set_target_properties(meshrepair PROPERTIES
@@ -351,6 +453,28 @@ if(Boost_FOUND)
     message(STATUS "  Boost: ${Boost_VERSION}")
 endif()
 message(STATUS "  OpenMP: ${OpenMP_CXX_FOUND}")
+if(MESHREPAIR_HAS_TBB)
+    if(TBB_VERSION)
+        message(STATUS "  oneTBB: ${TBB_VERSION}")
+    elseif(TBB_DIR)
+        message(STATUS "  oneTBB: found at ${TBB_DIR}")
+    else()
+        message(STATUS "  oneTBB: found")
+    endif()
+elseif(ENABLE_TBB)
+    message(STATUS "  oneTBB: NOT FOUND (CGAL parallelism disabled)")
+else()
+    message(STATUS "  oneTBB: DISABLED (ENABLE_TBB=OFF)")
+endif()
+if(MESHREPAIR_USE_SPDLOG)
+    if(MESHREPAIR_HAS_SPDLOG)
+        message(STATUS "  spdlog: ENABLED (using spdlog::spdlog)")
+    else()
+        message(STATUS "  spdlog: ENABLED but NOT FOUND (using fallback logger)")
+    endif()
+else()
+    message(STATUS "  spdlog: DISABLED (MESHREPAIR_USE_SPDLOG=OFF)")
+endif()
 if(RapidOBJ_FOUND)
     message(STATUS "  RapidOBJ: ${RapidOBJ_INCLUDE_DIR}")
 else()

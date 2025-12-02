@@ -1,36 +1,103 @@
 #include "pipeline_ops.h"
 #include "parallel_detection.h"
-#include "thread_safe_cout.h"
 #include "debug_path.h"
 #include "mesh_preprocessor.h"
+#include "logger.h"
 #include <CGAL/bounding_box.h>
+#include <algorithm>
+#include <atomic>
 #include <chrono>
-#include <iostream>
+#include <cstdint>
+#include <iomanip>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <thread>
 #include <unordered_set>
 
 namespace MeshRepair {
 
 namespace {
 
+    struct ParallelLogEntry {
+        uint64_t seq;
+        LogLevel level;
+        LogCategory category;
+        std::string message;
+    };
+
+    struct ParallelLogBuffer {
+        std::atomic<uint64_t> counter { 0 };
+        std::mutex mutex;
+        std::vector<ParallelLogEntry> entries;
+        bool enabled = true;
+    };
+
+    void append_parallel_log(ParallelLogBuffer* buffer, LogLevel level, LogCategory category, const std::string& msg)
+    {
+        if (!buffer || !buffer->enabled) {
+            switch (level) {
+            case LogLevel::Error: logError(category, msg); break;
+            case LogLevel::Warn: logWarn(category, msg); break;
+            case LogLevel::Detail: logDetail(category, msg); break;
+            case LogLevel::Debug: logDebug(category, msg); break;
+            case LogLevel::Info:
+            default: logInfo(category, msg); break;
+            }
+            return;
+        }
+
+        uint64_t seq = buffer->counter.fetch_add(1, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(buffer->mutex);
+        buffer->entries.push_back(ParallelLogEntry { seq, level, category, msg });
+    }
+
+    void flush_parallel_logs(ParallelLogBuffer& buffer)
+    {
+        std::vector<ParallelLogEntry> entries;
+        {
+            std::lock_guard<std::mutex> lock(buffer.mutex);
+            if (buffer.entries.empty()) {
+                return;
+            }
+            entries.swap(buffer.entries);
+        }
+
+        std::sort(entries.begin(), entries.end(),
+                  [](const ParallelLogEntry& a, const ParallelLogEntry& b) { return a.seq < b.seq; });
+
+        for (const auto& entry : entries) {
+            switch (entry.level) {
+            case LogLevel::Error: logError(entry.category, entry.message); break;
+            case LogLevel::Warn: logWarn(entry.category, entry.message); break;
+            case LogLevel::Detail: logDetail(entry.category, entry.message); break;
+            case LogLevel::Debug: logDebug(entry.category, entry.message); break;
+            case LogLevel::Info:
+            default: logInfo(entry.category, entry.message); break;
+            }
+        }
+    }
+
     void detect_holes_async(PipelineContext& ctx, BoundedQueue<HoleInfo>& hole_queue, std::atomic<bool>& detection_done,
-                            std::atomic<size_t>& holes_detected)
+                            std::atomic<size_t>& holes_detected, ParallelLogBuffer* log_buffer)
     {
         Mesh& mesh = *ctx.mesh;
 
         std::vector<halfedge_descriptor> border_halfedges;
         auto& pool = ctx.thread_mgr->detection_pool;
         if (pool.threadCount() > 1) {
-            border_halfedges = find_border_halfedges_parallel(mesh, pool, ctx.options.verbose);
+            border_halfedges = find_border_halfedges_parallel(mesh, pool, false);
         } else {
             for (auto h : mesh.halfedges()) {
                 if (mesh.is_border(h)) {
                     border_halfedges.push_back(h);
                 }
             }
+        }
 
-            if (ctx.options.verbose) {
-                std::cerr << "  [Detection] Found " << border_halfedges.size() << " border halfedges\n";
-            }
+        if (ctx.options.verbose) {
+            append_parallel_log(log_buffer, LogLevel::Info, LogCategory::Fill,
+                                "[Detection] Found " + std::to_string(border_halfedges.size()) + " border halfedges");
         }
 
         std::unordered_set<halfedge_descriptor> processed;
@@ -52,19 +119,24 @@ namespace {
             holes_detected.fetch_add(1);
 
             if (ctx.options.verbose) {
-                std::cerr << "  [Pipeline] Hole detected (" << hole.boundary_size << " vertices), queued for filling\n";
+                append_parallel_log(log_buffer, LogLevel::Info, LogCategory::Fill,
+                                    "[Pipeline] Hole detected (" + std::to_string(hole.boundary_size)
+                                        + " vertices), queued for filling");
             }
         }
 
         detection_done.store(true);
 
         if (ctx.options.verbose) {
-            std::cerr << "  [Pipeline] Detection complete: " << holes_detected.load() << " hole(s) found\n";
+            append_parallel_log(log_buffer, LogLevel::Info, LogCategory::Fill,
+                                "[Pipeline] Detection complete: " + std::to_string(holes_detected.load())
+                                    + " hole(s) found");
         }
     }
 
     void fill_holes_async(PipelineContext& ctx, BoundedQueue<HoleInfo>& hole_queue, std::atomic<bool>& detection_done,
-                          std::vector<HoleStatistics>& results, std::mutex& results_mutex)
+                          std::vector<HoleStatistics>& results, std::mutex& results_mutex,
+                          ParallelLogBuffer* log_buffer)
     {
         (void)detection_done;
 
@@ -92,13 +164,13 @@ namespace {
 
                 lock.unlock();
             } catch (const std::exception& e) {
-                thread_safe_log_err("  [ERROR] Exception during fill_hole: ");
-                thread_safe_log_err(e.what());
-                thread_safe_log_err("\n");
+                append_parallel_log(log_buffer, LogLevel::Error, LogCategory::Fill,
+                                    std::string("Exception during fill_hole: ") + e.what());
                 stats.filled_successfully = false;
                 stats.error_message       = std::string("Exception: ") + e.what();
             } catch (...) {
-                thread_safe_log_err("  [ERROR] Unknown exception during fill_hole\n");
+                append_parallel_log(log_buffer, LogLevel::Error, LogCategory::Fill,
+                                    "Unknown exception during hole filling");
                 stats.filled_successfully = false;
                 stats.error_message       = "Unknown exception during hole filling";
             }
@@ -109,16 +181,17 @@ namespace {
 
                 if (ctx.options.verbose) {
                     if (stats.filled_successfully) {
-                        std::string msg = "  [Pipeline] Hole filled: " + std::to_string(stats.num_faces_added)
+                        std::string msg = "[Pipeline] Hole filled: " + std::to_string(stats.num_faces_added)
                                           + " faces, " + std::to_string(stats.num_vertices_added) + " vertices added"
-                                          + (stats.fairing_succeeded ? "" : " [FAIRING FAILED]") + "\n";
-                        thread_safe_log(msg);
+                                          + (stats.fairing_succeeded ? "" : " [FAIRING FAILED]");
+                        append_parallel_log(log_buffer, LogLevel::Info, LogCategory::Fill, msg);
                     } else {
                         if (!stats.error_message.empty()) {
-                            std::string msg = "  [Pipeline] Hole filling FAILED: " + stats.error_message + "\n";
-                            thread_safe_log(msg);
+                            append_parallel_log(log_buffer, LogLevel::Error, LogCategory::Fill,
+                                                "[Pipeline] Hole filling FAILED: " + stats.error_message);
                         } else {
-                            thread_safe_log("  [Pipeline] Hole filling FAILED\n");
+                            append_parallel_log(log_buffer, LogLevel::Error, LogCategory::Fill,
+                                                "[Pipeline] Hole filling FAILED");
                         }
                     }
                 }
@@ -142,6 +215,8 @@ pipeline_process_pipeline(PipelineContext* ctx, bool verbose)
     ThreadManager& mgr  = *ctx->thread_mgr;
     FillingOptions opts = ctx->options;
 
+    auto fill_start = start_time;
+
     stats.original_vertices = mesh.number_of_vertices();
     stats.original_faces    = mesh.number_of_faces();
 
@@ -154,48 +229,63 @@ pipeline_process_pipeline(PipelineContext* ctx, bool verbose)
     std::atomic<size_t> holes_detected { 0 };
     std::vector<HoleStatistics> results;
     std::mutex results_mutex;
+    ParallelLogBuffer parallel_logs;
 
     if (verbose) {
-        std::cerr << "[Pipeline] Starting detection and filling in parallel\n";
-        std::cerr << "[Pipeline] Detection: " << mgr.config.detection_threads << " thread(s)\n";
-        std::cerr << "[Pipeline] Filling: " << mgr.config.filling_threads << " thread(s)\n";
-        std::cerr << "[Pipeline] Queue size: " << mgr.config.queue_size << " holes\n\n";
+        std::ostringstream start_log;
+        start_log << "[Pipeline] Starting detection and filling in parallel\n";
+        start_log << "[Pipeline] Detection: " << mgr.config.detection_threads << " thread(s)\n";
+        start_log << "[Pipeline] Filling: " << mgr.config.filling_threads << " thread(s)\n";
+        start_log << "[Pipeline] Queue size: " << mgr.config.queue_size << " holes";
+        logInfo(LogCategory::Fill, start_log.str());
     }
 
     auto& detection_pool = mgr.detection_pool;
 
     if (verbose) {
-        std::cerr << "[Pipeline] Enqueueing detection task...\n";
+        logInfo(LogCategory::Fill, "[Pipeline] Enqueueing detection task...");
     }
 
     std::atomic<bool> detection_finished { false };
-    detection_pool.enqueue([&ctx, &hole_queue, &detection_done, &holes_detected, verbose, &detection_finished]() {
+    std::atomic<double> detection_time_ms { 0.0 };
+    detection_pool.enqueue([&ctx, &hole_queue, &detection_done, &holes_detected, verbose, &detection_finished,
+                            &detection_time_ms, &parallel_logs]() {
         if (verbose) {
-            thread_safe_log("[Pipeline] Detection thread started\n");
+            append_parallel_log(&parallel_logs, LogLevel::Info, LogCategory::Fill,
+                                "[Pipeline] Detection thread started");
         }
-        detect_holes_async(*ctx, hole_queue, detection_done, holes_detected);
+        auto local_start = std::chrono::high_resolution_clock::now();
+        detect_holes_async(*ctx, hole_queue, detection_done, holes_detected, &parallel_logs);
+        auto local_end = std::chrono::high_resolution_clock::now();
+        detection_time_ms.store(std::chrono::duration<double, std::milli>(local_end - local_start).count(),
+                                std::memory_order_release);
         detection_finished.store(true, std::memory_order_release);
         if (verbose) {
-            thread_safe_log("[Pipeline] Detection thread finished\n");
+            append_parallel_log(&parallel_logs, LogLevel::Info, LogCategory::Fill,
+                                "[Pipeline] Detection thread finished");
         }
     });
 
     std::atomic<size_t> filling_active { 0 };
     std::vector<std::thread> filling_threads;
 
+    fill_start = std::chrono::high_resolution_clock::now();
+
     for (size_t i = 0; i < mgr.config.filling_threads; ++i) {
-        filling_threads.emplace_back(
-            [ctx, &hole_queue, &detection_done, &results, &results_mutex, i, verbose, &filling_active]() {
-                filling_active.fetch_add(1, std::memory_order_relaxed);
-                if (verbose) {
-                    thread_safe_log("[Pipeline] Filling thread " + std::to_string(i) + " started\n");
-                }
-                fill_holes_async(*ctx, hole_queue, detection_done, results, results_mutex);
-                if (verbose) {
-                    thread_safe_log("[Pipeline] Filling thread " + std::to_string(i) + " finished\n");
-                }
-                filling_active.fetch_sub(1, std::memory_order_relaxed);
-            });
+        filling_threads.emplace_back([ctx, &hole_queue, &detection_done, &results, &results_mutex, i, verbose,
+                                      &filling_active, &parallel_logs]() {
+            filling_active.fetch_add(1, std::memory_order_relaxed);
+            if (verbose) {
+                append_parallel_log(&parallel_logs, LogLevel::Info, LogCategory::Fill,
+                                    "[Pipeline] Filling thread " + std::to_string(i) + " started");
+            }
+            fill_holes_async(*ctx, hole_queue, detection_done, results, results_mutex, &parallel_logs);
+            if (verbose) {
+                append_parallel_log(&parallel_logs, LogLevel::Info, LogCategory::Fill,
+                                    "[Pipeline] Filling thread " + std::to_string(i) + " finished");
+            }
+            filling_active.fetch_sub(1, std::memory_order_relaxed);
+        });
     }
 
     while (!detection_finished.load(std::memory_order_acquire)) {
@@ -213,6 +303,8 @@ pipeline_process_pipeline(PipelineContext* ctx, bool verbose)
     auto end_time = std::chrono::high_resolution_clock::now();
 
     stats.num_holes_detected = holes_detected.load();
+    stats.detection_time_ms  = detection_time_ms.load(std::memory_order_acquire);
+    stats.fill_time_ms       = std::chrono::duration<double, std::milli>(end_time - fill_start).count();
     stats.total_time_ms      = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
     {
@@ -231,6 +323,8 @@ pipeline_process_pipeline(PipelineContext* ctx, bool verbose)
     stats.final_vertices = mesh.number_of_vertices();
     stats.final_faces    = mesh.number_of_faces();
 
+    flush_parallel_logs(parallel_logs);
+
     return stats;
 }
 
@@ -245,32 +339,42 @@ pipeline_process_batch(PipelineContext* ctx, bool verbose)
     Mesh& mesh         = *ctx->mesh;
     ThreadManager& mgr = *ctx->thread_mgr;
 
+    auto detect_start = std::chrono::high_resolution_clock::now();
+
     if (verbose) {
-        std::cerr << "[Batch] Detecting all holes first...\n";
+        logInfo(LogCategory::Fill, "[Batch] Detecting all holes first...");
     }
 
     HoleDetectorCtx detect_ctx { ctx->mesh, verbose };
     std::vector<HoleInfo> holes;
     detect_all_holes_ctx(detect_ctx, holes);
 
+    auto detect_end          = std::chrono::high_resolution_clock::now();
+    double detection_time_ms = std::chrono::duration<double, std::milli>(detect_end - detect_start).count();
+
     if (holes.empty()) {
         stats.original_vertices = mesh.number_of_vertices();
         stats.original_faces    = mesh.number_of_faces();
         stats.final_vertices    = stats.original_vertices;
         stats.final_faces       = stats.original_faces;
+        stats.detection_time_ms = detection_time_ms;
+        stats.total_time_ms     = detection_time_ms;
         return stats;
     }
 
     if (verbose) {
-        std::cerr << "[Batch] Filling " << holes.size() << " hole(s)...\n";
+        logInfo(LogCategory::Fill, "[Batch] Filling " + std::to_string(holes.size()) + " hole(s)...");
     }
 
     thread_manager_enter_filling(mgr);
 
     HoleFillerCtx fill_ctx;
-    fill_ctx.mesh    = &mesh;
-    fill_ctx.options = ctx->options;
-    return fill_all_holes_ctx(&fill_ctx, holes);
+    fill_ctx.mesh                = &mesh;
+    fill_ctx.options             = ctx->options;
+    MeshStatistics fill_stats    = fill_all_holes_ctx(&fill_ctx, holes);
+    fill_stats.detection_time_ms = detection_time_ms;
+    fill_stats.total_time_ms += detection_time_ms;
+    return fill_stats;
 }
 
 MeshStatistics
@@ -285,18 +389,27 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     ThreadManager& manager         = *ctx->thread_mgr;
     FillingOptions filling_options = ctx->options;
 
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto start_time       = std::chrono::high_resolution_clock::now();
+    auto detect_start     = start_time;
+    auto detect_end       = start_time;
+    auto partition_end    = start_time;
+    auto neighborhood_end = start_time;
+    auto extraction_end   = start_time;
+    auto fill_end         = start_time;
+    auto cleanup_end      = start_time;
 
     stats.original_vertices = mesh.number_of_vertices();
     stats.original_faces    = mesh.number_of_faces();
 
     if (verbose) {
-        std::cerr << "\n[Partitioned] Phase 1: Detecting holes...\n";
+        logInfo(LogCategory::Fill, "[Partitioned] Phase 1: Detecting holes...");
     }
 
     HoleDetectorCtx detect_ctx { &mesh, verbose };
     std::vector<HoleInfo> all_holes;
     detect_all_holes_ctx(detect_ctx, all_holes);
+    detect_end               = std::chrono::high_resolution_clock::now();
+    stats.detection_time_ms  = std::chrono::duration<double, std::milli>(detect_end - detect_start).count();
     stats.num_holes_detected = all_holes.size();
 
     if (all_holes.empty()) {
@@ -350,8 +463,8 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
             if (all_boundary) {
                 selection_boundary_skipped++;
                 if (verbose) {
-                    std::cerr << "[Partitioned] Skipping selection boundary hole: " << hole.boundary_size
-                              << " vertices\n";
+                    logInfo(LogCategory::Fill, "[Partitioned] Skipping selection boundary hole: "
+                                                   + std::to_string(hole.boundary_size) + " vertices");
                 }
                 continue;
             }
@@ -367,13 +480,17 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
         if (filling_options.holes_only) {
             mesh.clear();
         }
+        cleanup_end         = detect_end;
+        stats.total_time_ms = std::chrono::duration<double, std::milli>(cleanup_end - start_time).count();
         return stats;
     }
 
     if (verbose) {
-        std::cerr << "[Partitioned] Found " << all_holes.size() << " hole(s), " << holes.size()
+        std::ostringstream holes_msg;
+        holes_msg << "[Partitioned] Found " << all_holes.size() << " hole(s), " << holes.size()
                   << " fillable (skipped: " << selection_boundary_skipped << " selection boundaries, "
-                  << oversized_skipped << " oversized)\n";
+                  << oversized_skipped << " oversized)";
+        logInfo(LogCategory::Fill, holes_msg.str());
     }
 
     unsigned int rings = filling_options.fairing_continuity;
@@ -399,10 +516,11 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     const size_t effective_threads    = partitions.size();
 
     if (verbose) {
+        std::ostringstream partition_msg;
         if (filling_options.min_partition_boundary_edges > 0) {
-            std::cerr << "[Partitioned] Boundary edge budget: " << total_boundary_edges << " edges, minimum "
-                      << filling_options.min_partition_boundary_edges << " per partition -> up to "
-                      << max_by_edge_budget << " partition(s)\n";
+            partition_msg << "[Partitioned] Boundary edge budget: " << total_boundary_edges << " edges, minimum "
+                          << filling_options.min_partition_boundary_edges << " per partition -> up to "
+                          << max_by_edge_budget << " partition(s)\n";
         }
 
         std::vector<size_t> partition_edge_load(partitions.size(), 0);
@@ -414,23 +532,31 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
             partition_edge_load[i] = boundary_sum;
         }
 
-        std::cerr << "[Partitioned] Created " << partitions.size() << " partition(s) for " << effective_threads
-                  << " thread(s)" << (effective_threads < requested_partitions ? " (clamped by hole count)" : "")
-                  << ":\n";
+        partition_msg << "[Partitioned] Created " << partitions.size() << " partition(s) for " << effective_threads
+                      << " thread(s)" << (effective_threads < requested_partitions ? " (clamped by hole count)" : "")
+                      << ":\n";
         for (size_t i = 0; i < partitions.size(); ++i) {
-            std::cerr << "  Partition " << i << ": " << partitions[i].size() << " hole(s), " << partition_edge_load[i]
-                      << " boundary edges\n";
+            partition_msg << "  Partition " << i << ": " << partitions[i].size() << " hole(s), "
+                          << partition_edge_load[i] << " boundary edges\n";
         }
+        logInfo(LogCategory::Fill, partition_msg.str());
     }
+    partition_end           = std::chrono::high_resolution_clock::now();
+    stats.partition_time_ms = std::chrono::duration<double, std::milli>(partition_end - detect_end).count();
+    partition_end           = std::chrono::high_resolution_clock::now();
+    stats.partition_time_ms = std::chrono::duration<double, std::milli>(partition_end - detect_end).count();
 
     std::vector<HoleWithNeighborhood> neighborhoods(holes.size());
     for (size_t i = 0; i < holes.size(); ++i) {
         neighborhoods[i] = partition_compute_neighborhood(part_ctx, holes[i]);
     }
+    neighborhood_end           = std::chrono::high_resolution_clock::now();
+    stats.neighborhood_time_ms = std::chrono::duration<double, std::milli>(neighborhood_end - partition_end).count();
 
     if (verbose) {
-        std::cerr << "[Partitioned] Computed " << neighborhoods.size() << " neighborhood(s) with "
-                  << partition_ring_count(part_ctx) << "-ring radius\n";
+        logInfo(LogCategory::Fill, "[Partitioned] Computed " + std::to_string(neighborhoods.size())
+                                       + " neighborhood(s) with " + std::to_string(partition_ring_count(part_ctx))
+                                       + "-ring radius");
     }
 
     SubmeshExtractorCtx extractor_ctx { &mesh };
@@ -438,6 +564,8 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     for (size_t i = 0; i < partitions.size(); ++i) {
         submeshes[i] = submesh_extract_partition(extractor_ctx, partitions[i], holes, neighborhoods);
     }
+    extraction_end           = std::chrono::high_resolution_clock::now();
+    stats.extraction_time_ms = std::chrono::duration<double, std::milli>(extraction_end - neighborhood_end).count();
 
     if (debug) {
         std::string prefix = MeshRepair::DebugPath::start_step("partition");
@@ -449,17 +577,40 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
         }
     }
 
-    std::vector<FilledSubmesh> filled_submeshes;
-    filled_submeshes.reserve(submeshes.size());
-    for (size_t i = 0; i < submeshes.size(); ++i) {
-        filled_submeshes.push_back(fill_submesh_holes(std::move(submeshes[i]), filling_options));
-        stats.num_holes_filled += filled_submeshes.back().stats.num_holes_filled;
-        stats.num_holes_failed += filled_submeshes.back().stats.num_holes_failed;
-        stats.num_holes_skipped += filled_submeshes.back().stats.num_holes_skipped;
-        if (!filled_submeshes.back().stats.hole_details.empty()) {
-            stats.hole_details.insert(stats.hole_details.end(),
-                                      std::make_move_iterator(filled_submeshes.back().stats.hole_details.begin()),
-                                      std::make_move_iterator(filled_submeshes.back().stats.hole_details.end()));
+    std::vector<FilledSubmesh> filled_submeshes(submeshes.size());
+    std::atomic<size_t> next_partition { 0 };
+    const size_t worker_count = effective_threads > 0 ? effective_threads : 1;
+    std::vector<std::thread> workers;
+    workers.reserve(worker_count);
+
+    for (size_t i = 0; i < worker_count; ++i) {
+        workers.emplace_back([&submeshes, &filled_submeshes, &filling_options, &next_partition]() {
+            while (true) {
+                size_t idx = next_partition.fetch_add(1, std::memory_order_relaxed);
+                if (idx >= submeshes.size()) {
+                    break;
+                }
+                FilledSubmesh filled  = fill_submesh_holes(std::move(submeshes[idx]), filling_options);
+                filled_submeshes[idx] = std::move(filled);
+            }
+        });
+    }
+
+    for (auto& worker : workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    fill_end           = std::chrono::high_resolution_clock::now();
+    stats.fill_time_ms = std::chrono::duration<double, std::milli>(fill_end - extraction_end).count();
+
+    for (auto& fs : filled_submeshes) {
+        stats.num_holes_filled += fs.stats.num_holes_filled;
+        stats.num_holes_failed += fs.stats.num_holes_failed;
+        stats.num_holes_skipped += fs.stats.num_holes_skipped;
+        if (!fs.stats.hole_details.empty()) {
+            stats.hole_details.insert(stats.hole_details.end(), std::make_move_iterator(fs.stats.hole_details.begin()),
+                                      std::make_move_iterator(fs.stats.hole_details.end()));
         }
     }
 
@@ -479,10 +630,27 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
         filled_meshes.push_back(std::move(fs.submesh));
     }
 
-    Mesh merged = mesh_merger_merge(mesh, filled_meshes, verbose, filling_options.holes_only, debug);
-    mesh        = std::move(merged);
+    auto merge_start = fill_end;
+    MergeTiming merge_timings;
+    Mesh merged    = mesh_merger_merge(mesh, filled_meshes, verbose, filling_options.holes_only, debug, &merge_timings);
+    mesh           = std::move(merged);
+    auto merge_end = std::chrono::high_resolution_clock::now();
+    stats.merge_time_ms                  = std::chrono::duration<double, std::milli>(merge_end - merge_start).count();
+    stats.merge_dedup_ms                 = merge_timings.dedup_ms;
+    stats.merge_copy_base_ms             = merge_timings.copy_base_ms;
+    stats.merge_append_ms                = merge_timings.append_ms;
+    stats.merge_repair_ms                = merge_timings.repair_ms;
+    stats.merge_orient_ms                = merge_timings.orient_ms;
+    stats.merge_convert_ms               = merge_timings.convert_ms;
+    stats.merge_validation_removed       = merge_timings.validation_removed;
+    stats.merge_validation_out_of_bounds = merge_timings.validation_out_of_bounds;
+    stats.merge_validation_invalid_cycle = merge_timings.validation_invalid_cycle;
+    stats.merge_validation_edge_orientation = merge_timings.validation_edge_orientation;
+    stats.merge_validation_non_manifold     = merge_timings.validation_non_manifold;
+    stats.merge_validation_passes           = merge_timings.validation_passes;
 
     // Cleanup after merge to ensure consistent indexing and remove garbage
+    auto cleanup_start = merge_end;
     if (mesh.has_garbage()) {
         mesh.collect_garbage();
     }
@@ -491,6 +659,8 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     if (!filling_options.holes_only && filling_options.keep_largest_component) {
         cleanup.keep_only_largest_connected_component();
     }
+    cleanup_end           = std::chrono::high_resolution_clock::now();
+    stats.cleanup_time_ms = std::chrono::duration<double, std::milli>(cleanup_end - cleanup_start).count();
 
     if (debug) {
         std::string debug_file = MeshRepair::DebugPath::step_file(
@@ -501,7 +671,7 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     stats.final_vertices = mesh.number_of_vertices();
     stats.final_faces    = mesh.number_of_faces();
 
-    auto end_time       = std::chrono::high_resolution_clock::now();
+    auto end_time       = cleanup_end;
     stats.total_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
     return stats;

@@ -39,6 +39,24 @@ struct SubmeshExtractorCtx {
     const Mesh* mesh = nullptr;
 };
 
+struct MergeTiming {
+    double dedup_ms     = 0.0;
+    double copy_base_ms = 0.0;
+    double append_ms    = 0.0;
+    double repair_ms    = 0.0;
+    double orient_ms    = 0.0;
+    double convert_ms   = 0.0;
+    double total_ms     = 0.0;
+
+    // Validation stats
+    size_t validation_removed          = 0;
+    size_t validation_out_of_bounds    = 0;
+    size_t validation_invalid_cycle    = 0;
+    size_t validation_edge_orientation = 0;
+    size_t validation_non_manifold     = 0;
+    size_t validation_passes           = 0;
+};
+
 Submesh
 submesh_extract(const SubmeshExtractorCtx& ctx, const std::unordered_set<face_descriptor>& faces,
                 const std::vector<HoleInfo>& holes);
@@ -49,6 +67,6 @@ submesh_extract_partition(const SubmeshExtractorCtx& ctx, const std::vector<size
 
 Mesh
 mesh_merger_merge(const Mesh& original_mesh, const std::vector<Submesh>& submeshes, bool verbose = false,
-                  bool holes_only = false, bool debug_dump = false);
+                  bool holes_only = false, bool debug_dump = false, MergeTiming* timings = nullptr);
 
 }  // namespace MeshRepair

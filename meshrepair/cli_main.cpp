@@ -8,10 +8,12 @@
 #include "config.h"
 #include "debug_path.h"
 #include "help_printer.h"
+#include "logger.h"
 
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
 #include <CGAL/IO/PLY.h>
-#include <iostream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <cstring>
 #include <chrono>
@@ -24,9 +26,10 @@ struct CommandLineArgs {
     std::string input_file;
     std::string output_file;
     FillingOptions filling_options;
-    int verbosity  = 1;  // 0=quiet, 1=info(stats), 2=verbose, 3=debug, 4=trace(PLY dumps)
-    bool validate  = false;
-    bool ascii_ply = false;  // Use ASCII PLY instead of binary
+    int verbosity      = 1;  // 0=quiet, 1=info(stats), 2=verbose, 3=debug, 4=trace(PLY dumps)
+    bool validate      = false;
+    bool ascii_ply     = false;  // Use ASCII PLY instead of binary
+    bool per_hole_info = false;  // Print per-hole timing/details in stats output
 
     // Preprocessing options
     bool enable_preprocessing              = true;
@@ -71,7 +74,7 @@ struct CommandLineArgs {
             if (arg == "--continuity" && i + 1 < argc) {
                 filling_options.fairing_continuity = std::stoi(argv[++i]);
                 if (filling_options.fairing_continuity > 2) {
-                    std::cout << "Error: Continuity must be 0, 1, or 2\n";
+                    logError(LogCategory::Cli, "Error: Continuity must be 0, 1, or 2");
                     return false;
                 }
             } else if (arg == "--max-boundary" && i + 1 < argc) {
@@ -88,12 +91,14 @@ struct CommandLineArgs {
                 filling_options.refine = false;
             } else if (arg == "--holes_only") {
                 filling_options.holes_only = true;
+            } else if (arg == "--per-hole-info") {
+                per_hole_info = true;
             } else if (arg == "--verbose" || arg == "-v") {
                 // Check if next arg is a number
                 if (i + 1 < argc && argv[i + 1][0] != '-') {
                     verbosity = std::stoi(argv[++i]);
                     if (verbosity < 0 || verbosity > 4) {
-                        std::cout << "Error: Verbosity level must be 0-4\n";
+                        logError(LogCategory::Cli, "Error: Verbosity level must be 0-4");
                         return false;
                     }
                 } else {
@@ -122,7 +127,7 @@ struct CommandLineArgs {
             } else if (arg == "--non-manifold-passes" && i + 1 < argc) {
                 non_manifold_passes = std::stoul(argv[++i]);
                 if (non_manifold_passes == 0) {
-                    std::cout << "Error: Non-manifold passes must be at least 1\n";
+                    logError(LogCategory::Cli, "Error: Non-manifold passes must be at least 1");
                     return false;
                 }
             } else if (arg == "--threads" && i + 1 < argc) {
@@ -130,7 +135,7 @@ struct CommandLineArgs {
             } else if (arg == "--queue-size" && i + 1 < argc) {
                 queue_size = std::stoul(argv[++i]);
                 if (queue_size == 0) {
-                    std::cout << "Error: Queue size must be at least 1\n";
+                    logError(LogCategory::Cli, "Error: Queue size must be at least 1");
                     return false;
                 }
             } else if (arg == "--no-partition") {
@@ -140,7 +145,7 @@ struct CommandLineArgs {
             } else if (arg == "--cgal-loader") {
                 force_cgal_loader = true;
             } else {
-                std::cout << "Unknown option: " << arg << "\n";
+                logError(LogCategory::Cli, "Unknown option: " + arg);
                 return false;
             }
         }
@@ -152,6 +157,10 @@ struct CommandLineArgs {
 int
 cli_main(int argc, char** argv)
 {
+    LoggerConfig log_cfg;
+    log_cfg.useStderr = false;
+    initLogger(log_cfg);
+
     // Parse command-line arguments
     CommandLineArgs args;
     if (!args.parse(argc, argv)) {
@@ -172,32 +181,39 @@ cli_main(int argc, char** argv)
     bool verbose    = (args.verbosity >= 2);
     bool debug      = (args.verbosity >= 4);  // PLY dumps only at level 4
 
-    args.filling_options.verbose       = verbose;
-    args.filling_options.show_progress = (args.verbosity > 0);
+    log_cfg.minLevel = logLevelFromVerbosity(args.verbosity);
+    setLogLevel(log_cfg.minLevel);
+
+    args.filling_options.verbose                = verbose;
+    args.filling_options.show_progress          = (args.verbosity > 0);
     args.filling_options.keep_largest_component = args.preprocess_keep_largest_component;
 
     if (args.verbosity > 0) {
-        std::cout << "=== MeshHoleFiller v" << Config::VERSION << " ===\n";
-        std::cout << " Bult: " << Config::BUILD_DATE << " " << Config::BUILD_TIME << "\n\n";
+        std::ostringstream banner;
+        banner << "=== MeshHoleFiller v" << Config::VERSION << " ===\n";
+        banner << MESHREPAIR_BUILD_CONFIG << " Build: " << Config::BUILD_DATE << " " << Config::BUILD_TIME;
+        logInfo(LogCategory::Empty, banner.str());
     }
 
     // Step 1: Load mesh as polygon soup (optimized - avoids mesh construction)
     if (verbose) {
-        std::cout << "Loading mesh from: " << args.input_file << "\n";
+        logInfo(LogCategory::Cli, "Loading mesh from: " + args.input_file);
     }
 
     PolygonSoup soup;
     Mesh mesh;  // Will be populated during preprocessing or immediately if no preprocessing
     if (mesh_loader_load_soup(args.input_file.c_str(), MeshLoader::Format::AUTO, args.force_cgal_loader, &soup) != 0) {
-        std::cout << "Error: " << mesh_loader_last_error() << "\n";
+        logError(LogCategory::Cli, std::string("Error: ") + mesh_loader_last_error());
         return 1;
     }
 
     if (verbose) {
-        std::cout << "Loaded polygon soup from: " << args.input_file << "\n";
-        std::cout << "  Points: " << soup.points.size() << "\n";
-        std::cout << "  Polygons: " << soup.polygons.size() << "\n";
-        std::cout << "  Load time: " << std::fixed << std::setprecision(2) << soup.load_time_ms << " ms\n\n";
+        std::ostringstream load_report;
+        load_report << "Loaded polygon soup from: " << args.input_file << "\n"
+                    << "  Points: " << soup.points.size() << "\n"
+                    << "  Polygons: " << soup.polygons.size() << "\n"
+                    << "  Load time: " << std::fixed << std::setprecision(2) << soup.load_time_ms << " ms";
+        logInfo(LogCategory::Cli, load_report.str());
     }
 
     // Configure threading
@@ -221,9 +237,11 @@ cli_main(int argc, char** argv)
             PMP::polygon_soup_to_polygon_mesh(soup.points, soup.polygons, debug_mesh);
             if (CGAL::IO::write_PLY(debug_file, debug_mesh, CGAL::parameters::use_binary_mode(true))) {
                 if (args.verbosity > 0) {
-                    std::cout << "  [DEBUG] Saved original loaded soup: " << debug_file << "\n";
-                    std::cout << "  [DEBUG]   Points: " << soup.points.size() << "\n";
-                    std::cout << "  [DEBUG]   Polygons: " << soup.polygons.size() << "\n\n";
+                    std::ostringstream debug_log;
+                    debug_log << "  [DEBUG] Saved original loaded soup: " << debug_file << "\n"
+                              << "  [DEBUG]   Points: " << soup.points.size() << "\n"
+                              << "  [DEBUG]   Polygons: " << soup.polygons.size();
+                    logDebug(LogCategory::Cli, debug_log.str());
                 }
             }
         }
@@ -242,20 +260,22 @@ cli_main(int argc, char** argv)
         prep_stats = MeshPreprocessor::preprocess_soup(soup, mesh, prep_opts);
 
         if (show_stats && verbose) {
-            std::cout << "\n=== Preprocessing Report ===\n";
-            std::cout << "Duplicate vertices merged: " << prep_stats.duplicates_merged << "\n";
-            std::cout << "Non-manifold polygons removed: " << prep_stats.non_manifold_vertices_removed << "\n";
-            std::cout << "3-face fans collapsed: " << prep_stats.face_fans_collapsed << "\n";
-            std::cout << "Isolated vertices removed: " << prep_stats.isolated_vertices_removed << "\n";
-            std::cout << "Connected components found: " << prep_stats.connected_components_found << "\n";
-            std::cout << "Small components removed: " << prep_stats.small_components_removed << "\n";
-            std::cout << "Timing breakdown:\n";
-            std::cout << "  Soup cleanup: " << std::fixed << std::setprecision(2) << prep_stats.soup_cleanup_time_ms
-                      << " ms\n";
-            std::cout << "  Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n";
-            std::cout << "  Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n";
-            std::cout << "  Total: " << prep_stats.total_time_ms << " ms\n";
-            std::cout << "============================\n\n";
+            std::ostringstream prep_report;
+            prep_report << "=== Preprocessing Report ===\n"
+                        << "Duplicate vertices merged: " << prep_stats.duplicates_merged << "\n"
+                        << "Non-manifold polygons removed: " << prep_stats.non_manifold_vertices_removed << "\n"
+                        << "3-face fans collapsed: " << prep_stats.face_fans_collapsed << "\n"
+                        << "Isolated vertices removed: " << prep_stats.isolated_vertices_removed << "\n"
+                        << "Connected components found: " << prep_stats.connected_components_found << "\n"
+                        << "Small components removed: " << prep_stats.small_components_removed << "\n"
+                        << "Timing breakdown:\n"
+                        << "  Soup cleanup: " << std::fixed << std::setprecision(2) << prep_stats.soup_cleanup_time_ms
+                        << " ms\n"
+                        << "  Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n"
+                        << "  Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n"
+                        << "  Total: " << prep_stats.total_time_ms << " ms\n"
+                        << "============================\n";
+            logInfo(LogCategory::Cli, prep_report.str());
         }
     } else {
         // No preprocessing - just convert soup to mesh directly
@@ -266,26 +286,28 @@ cli_main(int argc, char** argv)
         double convert_time_ms = std::chrono::duration<double, std::milli>(convert_end - convert_start).count();
 
         if (args.verbosity > 0 && args.filling_options.verbose) {
-            std::cout << "Converted soup to mesh (no preprocessing)\n";
-            std::cout << "  Vertices: " << mesh.number_of_vertices() << "\n";
-            std::cout << "  Faces: " << mesh.number_of_faces() << "\n";
-            std::cout << "  Conversion time: " << std::fixed << std::setprecision(2) << convert_time_ms << " ms\n\n";
+            std::ostringstream convert_report;
+            convert_report << "Converted soup to mesh (no preprocessing)\n"
+                           << "  Vertices: " << mesh.number_of_vertices() << "\n"
+                           << "  Faces: " << mesh.number_of_faces() << "\n"
+                           << "  Conversion time: " << std::fixed << std::setprecision(2) << convert_time_ms << " ms";
+            logInfo(LogCategory::Cli, convert_report.str());
         }
     }
 
     // Validate mesh if requested (after conversion to mesh)
     if (args.validate) {
         if (args.verbosity > 0) {
-            std::cout << "\n=== Input Mesh Validation ===\n";
+            logInfo(LogCategory::Cli, "=== Input Mesh Validation ===");
         }
         MeshValidator::print_statistics(mesh, true);
 
         if (!MeshValidator::is_valid(mesh)) {
-            std::cout << "Warning: Input mesh failed validity checks\n";
+            logWarn(LogCategory::Cli, "Warning: Input mesh failed validity checks");
         }
 
         if (!MeshValidator::is_triangle_mesh(mesh)) {
-            std::cout << "Error: Mesh must be a triangle mesh\n";
+            logError(LogCategory::Cli, "Error: Mesh must be a triangle mesh");
             return 1;
         }
     }
@@ -295,7 +317,8 @@ cli_main(int argc, char** argv)
 
     if (args.filling_options.holes_only && !args.use_partitioned) {
         if (args.verbosity > 0) {
-            std::cout << "Warning: --holes_only is supported only in partitioned mode; flag will be ignored.\n";
+            logWarn(LogCategory::Cli,
+                    "Warning: --holes_only is supported only in partitioned mode; flag will be ignored.");
         }
         args.filling_options.holes_only = false;
     }
@@ -303,7 +326,7 @@ cli_main(int argc, char** argv)
     if (args.use_partitioned) {
         // Use partitioned parallel filling (default mode)
         if (args.verbosity > 0 && args.filling_options.verbose) {
-            std::cout << "\n=== Partitioned Parallel Filling (Default) ===\n";
+            logInfo(LogCategory::Cli, "=== Partitioned Parallel Filling (Default) ===");
         }
 
         ParallelPipelineCtx ctx;
@@ -315,7 +338,7 @@ cli_main(int argc, char** argv)
     } else {
         // Use legacy pipeline processing
         if (args.verbosity > 0 && args.filling_options.verbose) {
-            std::cout << "\n=== Legacy Pipeline Mode ===\n";
+            logInfo(LogCategory::Cli, "=== Legacy Pipeline Mode ===");
         }
 
         PipelineContext ctx;
@@ -333,12 +356,12 @@ cli_main(int argc, char** argv)
     // Check if no holes were found
     if (stats.num_holes_detected == 0) {
         if (args.verbosity > 0) {
-            std::cout << "No holes found. Mesh is already closed.\n";
+            logInfo(LogCategory::Cli, "No holes found. Mesh is already closed.");
         }
 
         // Save anyway in case of format conversion
         if (mesh_loader_save(mesh, args.output_file.c_str(), MeshLoader::Format::AUTO, true) != 0) {
-            std::cout << "Error: " << mesh_loader_last_error() << "\n";
+            logError(LogCategory::Cli, std::string("Error: ") + mesh_loader_last_error());
             return 1;
         }
 
@@ -348,34 +371,35 @@ cli_main(int argc, char** argv)
     // Step 4: Validate output mesh if requested
     if (args.validate) {
         if (args.verbosity > 0) {
-            std::cout << "\n=== Output Mesh Validation ===\n";
+            logInfo(LogCategory::Cli, "=== Output Mesh Validation ===");
         }
         MeshValidator::print_statistics(mesh, true);
 
         if (!MeshValidator::is_valid(mesh)) {
-            std::cout << "Warning: Output mesh failed validity checks\n";
+            logWarn(LogCategory::Cli, "Warning: Output mesh failed validity checks");
         }
     }
 
     // Step 5: Save result
     if (args.verbosity > 0 && args.filling_options.verbose) {
-        std::cout << "\nSaving result to: " << args.output_file;
+        std::ostringstream save_msg;
+        save_msg << "Saving result to: " << args.output_file;
         // Check if output is PLY format (C++17 compatible)
         size_t len = args.output_file.length();
         if (len >= 4) {
             std::string ext = args.output_file.substr(len - 4);
             if (ext == ".ply" || ext == ".PLY") {
-                std::cout << " (" << (args.ascii_ply ? "ASCII" : "binary") << " PLY)";
+                save_msg << " (" << (args.ascii_ply ? "ASCII" : "binary") << " PLY)";
             }
         }
-        std::cout << "\n";
+        logInfo(LogCategory::Cli, save_msg.str());
     }
 
     // Binary PLY by default, ASCII if requested
     auto save_start_time = std::chrono::high_resolution_clock::now();
     bool use_binary_ply  = !args.ascii_ply;
     if (mesh_loader_save(mesh, args.output_file.c_str(), MeshLoader::Format::AUTO, use_binary_ply) != 0) {
-        std::cout << "Error: " << mesh_loader_last_error() << "\n";
+        logError(LogCategory::Cli, std::string("Error: ") + mesh_loader_last_error());
         return 1;
     }
     auto save_end_time  = std::chrono::high_resolution_clock::now();
@@ -383,63 +407,78 @@ cli_main(int argc, char** argv)
 
     // Step 6: Print detailed statistics if requested
     if (show_stats) {
-        std::cout << "\n=== Detailed Statistics ===\n";
-        std::cout << "Original mesh:\n";
-        std::cout << "  Vertices: " << stats.original_vertices << "\n";
-        std::cout << "  Faces: " << stats.original_faces << "\n";
+        std::ostringstream stats_report;
+        stats_report << "=== Detailed Statistics ===\n";
+        stats_report << "Original mesh:\n";
+        stats_report << "  Vertices: " << stats.original_vertices << "\n";
+        stats_report << "  Faces: " << stats.original_faces << "\n";
 
-        std::cout << "\nFinal mesh:\n";
+        stats_report << "Final mesh:\n";
         if (args.filling_options.holes_only) {
-            std::cout << "  [holes_only] Output contains only reconstructed faces (base mesh faces omitted)\n";
+            stats_report << "  [holes_only] Output contains only reconstructed faces (base mesh faces omitted)\n";
         }
-        std::cout << "  Vertices: " << stats.final_vertices << " (+" << mesh_stats_total_vertices_added(stats) << ")\n";
-        std::cout << "  Faces: " << stats.final_faces << " (+" << mesh_stats_total_faces_added(stats) << ")\n";
+        stats_report << "  Vertices: " << stats.final_vertices << " (+" << mesh_stats_total_vertices_added(stats)
+                     << ")\n";
+        stats_report << "  Faces: " << stats.final_faces << " (+" << mesh_stats_total_faces_added(stats) << ")\n";
 
-        std::cout << "\nHole processing:\n";
-        std::cout << "  Detected: " << stats.num_holes_detected << "\n";
-        std::cout << "  Filled: " << stats.num_holes_filled << "\n";
-        std::cout << "  Failed: " << stats.num_holes_failed << "\n";
-        std::cout << "  Skipped: " << stats.num_holes_skipped << "\n";
+        stats_report << "Hole processing:\n";
+        stats_report << "  Detected: " << stats.num_holes_detected << "\n";
+        stats_report << "  Filled: " << stats.num_holes_filled << "\n";
+        stats_report << "  Failed: " << stats.num_holes_failed << "\n";
+        stats_report << "  Skipped: " << stats.num_holes_skipped << "\n";
 
-        std::cout << "\nTiming breakdown:\n";
-        std::cout << "  File load: " << std::fixed << std::setprecision(2) << soup.load_time_ms << " ms\n";
+        stats_report << "Timing breakdown:\n";
+        stats_report << "  File load: " << std::fixed << std::setprecision(2) << soup.load_time_ms << " ms\n";
         if (args.enable_preprocessing) {
-            std::cout << "  Preprocessing:\n";
-            std::cout << "    Soup cleanup: " << prep_stats.soup_cleanup_time_ms << " ms\n";
-            std::cout << "    Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n";
-            std::cout << "    Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n";
-            std::cout << "    Subtotal: " << prep_stats.total_time_ms << " ms\n";
+            stats_report << "  Preprocessing:\n";
+            stats_report << "    Soup cleanup: " << prep_stats.soup_cleanup_time_ms << " ms\n";
+            stats_report << "    Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n";
+            stats_report << "    Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n";
+            stats_report << "    Subtotal: " << prep_stats.total_time_ms << " ms\n";
         }
-        std::cout << "  Hole filling: " << stats.total_time_ms << " ms\n";
-        std::cout << "  File save: " << save_time_ms << " ms\n";
+        stats_report << "  Hole filling: " << stats.total_time_ms << " ms\n";
+        if (stats.merge_validation_passes > 0 || stats.merge_validation_removed > 0) {
+            stats_report << "    Merge validation removed " << stats.merge_validation_removed
+                         << " (oob=" << stats.merge_validation_out_of_bounds
+                         << ", invalid=" << stats.merge_validation_invalid_cycle
+                         << ", edges=" << stats.merge_validation_edge_orientation
+                         << ", non_manifold=" << stats.merge_validation_non_manifold
+                         << ", passes=" << stats.merge_validation_passes << ")\n";
+        }
+        stats_report << "  File save: " << save_time_ms << " ms\n";
 
         auto program_end_time = std::chrono::high_resolution_clock::now();
         double total_program_time_ms
             = std::chrono::duration<double, std::milli>(program_end_time - program_start_time).count();
-        std::cout << "  Total program time: " << total_program_time_ms << " ms\n";
+        stats_report << "  Total program time: " << total_program_time_ms << " ms\n";
 
-        if (args.filling_options.verbose && !stats.hole_details.empty()) {
-            std::cout << "\nPer-hole details:\n";
+        logInfo(LogCategory::Cli, stats_report.str());
+
+        if (args.per_hole_info && !stats.hole_details.empty()) {
+            std::ostringstream per_hole_report;
+            per_hole_report << "Per-hole details:\n";
             for (size_t i = 0; i < stats.hole_details.size(); ++i) {
                 const auto& h = stats.hole_details[i];
-                std::cout << "  Hole " << (i + 1) << ": ";
+                per_hole_report << "  Hole " << (i + 1) << ": ";
                 if (h.filled_successfully) {
-                    std::cout << "OK - " << h.num_faces_added << " faces, " << h.num_vertices_added << " vertices, "
-                              << h.fill_time_ms << " ms";
+                    per_hole_report << "OK - " << h.num_faces_added << " faces, " << h.num_vertices_added
+                                    << " vertices, " << h.fill_time_ms << " ms";
                     if (!h.fairing_succeeded) {
-                        std::cout << " [fairing failed]";
+                        per_hole_report << " [fairing failed]";
                     }
                 } else {
-                    std::cout << "FAILED";
+                    per_hole_report << "FAILED";
                 }
-                std::cout << "\n";
+                per_hole_report << "\n";
             }
+            logInfo(LogCategory::Cli, per_hole_report.str());
         }
-        std::cout << "===========================\n";
+
+        logInfo(LogCategory::Cli, "===========================");
     }
 
     if (args.verbosity > 0) {
-        std::cout << "\nDone! Successfully processed mesh.\n";
+        logInfo(LogCategory::Cli, "Done! Successfully processed mesh.");
     }
 
     return 0;

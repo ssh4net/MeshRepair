@@ -9,12 +9,109 @@
 #include <numeric>
 #include <vector>
 #include <cstdint>
+#include <string>
+#include <sstream>
+#include <iomanip>
 #include "polygon_soup_repair.h"
+#include "polygon_soup_validation.h"
 #include "debug_path.h"
+#include "logger.h"
 
 namespace PMP = CGAL::Polygon_mesh_processing;
 
 namespace MeshRepair {
+
+namespace {
+    struct PointKey {
+        double x;
+        double y;
+        double z;
+    };
+
+    struct PointKeyHash {
+        size_t operator()(const PointKey& p) const
+        {
+            uint64_t h = 1469598103934665603ull;
+            auto mix   = [&h](uint64_t v) {
+                h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+                h *= 1099511628211ull;
+            };
+            mix(std::hash<double> {}(p.x));
+            mix(std::hash<double> {}(p.y));
+            mix(std::hash<double> {}(p.z));
+            return static_cast<size_t>(h);
+        }
+    };
+
+    struct PointKeyEq {
+        bool operator()(const PointKey& a, const PointKey& b) const { return a.x == b.x && a.y == b.y && a.z == b.z; }
+    };
+
+    void deduplicate_points(std::vector<Point_3>& points, std::vector<std::vector<std::size_t>>& polygons)
+    {
+        std::unordered_map<PointKey, std::size_t, PointKeyHash, PointKeyEq> point_map;
+        point_map.reserve(points.size() * 2);
+
+        std::vector<Point_3> new_points;
+        new_points.reserve(points.size());
+        std::vector<std::size_t> remap(points.size());
+
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            const auto& p = points[i];
+            PointKey key { CGAL::to_double(p.x()), CGAL::to_double(p.y()), CGAL::to_double(p.z()) };
+            auto it = point_map.find(key);
+            if (it == point_map.end()) {
+                std::size_t new_idx = new_points.size();
+                point_map.emplace(key, new_idx);
+                new_points.push_back(p);
+                remap[i] = new_idx;
+            } else {
+                remap[i] = it->second;
+            }
+        }
+
+        points.swap(new_points);
+
+        for (auto& poly : polygons) {
+            for (auto& vidx : poly) {
+                vidx = remap[vidx];
+            }
+        }
+    }
+
+    uint64_t hash_polygon_sorted(const std::vector<std::size_t>& poly)
+    {
+        std::vector<std::size_t> sorted(poly.begin(), poly.end());
+        std::sort(sorted.begin(), sorted.end());
+        uint64_t h = 1469598103934665603ull;
+        for (auto v : sorted) {
+            h ^= static_cast<uint64_t>(v) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+            h *= 1099511628211ull;
+        }
+        return h;
+    }
+
+    void deduplicate_polygons(std::vector<std::vector<std::size_t>>& polygons)
+    {
+        std::unordered_set<uint64_t> poly_hashes;
+        poly_hashes.reserve(polygons.size() * 2);
+        std::vector<std::vector<std::size_t>> unique_polys;
+        unique_polys.reserve(polygons.size());
+
+        for (auto& poly : polygons) {
+            poly.erase(std::unique(poly.begin(), poly.end()), poly.end());
+            if (poly.size() < 3) {
+                continue;
+            }
+            uint64_t h = hash_polygon_sorted(poly);
+            if (poly_hashes.insert(h).second) {
+                unique_polys.push_back(std::move(poly));
+            }
+        }
+
+        polygons.swap(unique_polys);
+    }
+}  // namespace
 
 HoleWithNeighborhood
 partition_compute_neighborhood(const MeshPartitionerCtx& ctx, const HoleInfo& hole)
@@ -284,14 +381,17 @@ namespace {
 
 Mesh
 mesh_merger_merge(const Mesh& original_mesh, const std::vector<Submesh>& submeshes, bool verbose, bool holes_only,
-                  bool debug_dump)
+                  bool debug_dump, MergeTiming* timings)
 {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
     std::vector<Point_3> points;
     std::vector<std::vector<std::size_t>> polygons;
 
     points.reserve(original_mesh.number_of_vertices());
     polygons.reserve(original_mesh.number_of_faces());
 
+    auto copy_start = total_start;
     for (auto v : original_mesh.vertices()) {
         points.push_back(original_mesh.point(v));
     }
@@ -317,7 +417,9 @@ mesh_merger_merge(const Mesh& original_mesh, const std::vector<Submesh>& submesh
             polygons.push_back(std::move(poly));
         }
     }
+    auto copy_end = std::chrono::high_resolution_clock::now();
 
+    auto append_start = copy_end;
     for (const auto& sub : submeshes) {
         std::size_t offset = points.size();
         points.reserve(points.size() + sub.mesh.number_of_vertices());
@@ -356,35 +458,97 @@ mesh_merger_merge(const Mesh& original_mesh, const std::vector<Submesh>& submesh
             polygons.push_back(std::move(poly));
         }
     }
+    auto append_end = std::chrono::high_resolution_clock::now();
 
     if (verbose) {
-        std::cerr << "[Merge] Combined soup (pre-repair): " << points.size() << " points, " << polygons.size()
-                  << " polygons\n";
+        logInfo(LogCategory::Fill, "[Merge] Combined soup (pre-repair): " + std::to_string(points.size()) + " points, "
+                                       + std::to_string(polygons.size()) + " polygons");
     }
 
     // Debug dump: raw combined soup before repair/orient
     if (verbose || debug_dump) {
+        auto debug_points   = points;
+        auto debug_polygons = polygons;
+#if false
+        auto debug_validation = validate_polygon_soup_basic(debug_points, debug_polygons);
+
+        if (verbose && debug_validation.polygons_removed_total > 0) {
+            std::ostringstream validation_msg;
+            validation_msg << "[Merge] Raw soup validation removed " << debug_validation.polygons_removed_total
+                           << " polygon(s)"
+                           << " [out_of_bounds=" << debug_validation.polygons_removed_out_of_bounds
+                           << ", invalid_cycle=" << debug_validation.polygons_removed_invalid_cycle
+                           << ", edge_orientation=" << debug_validation.polygons_removed_edge_orientation
+                           << ", non_manifold=" << debug_validation.polygons_removed_non_manifold
+                           << ", passes=" << debug_validation.passes_executed << "]";
+            logInfo(LogCategory::Fill, validation_msg.str());
+        }
+#endif
         Mesh raw_mesh;
-        PMP::polygon_soup_to_polygon_mesh(points, polygons, raw_mesh);
+        PMP::polygon_soup_to_polygon_mesh(debug_points, debug_polygons, raw_mesh);
         std::string debug_file = DebugPath::step_file(holes_only ? "merged_partitions_holes_only_raw"
                                                                  : "merged_partitions_raw");
         CGAL::IO::write_PLY(debug_file, raw_mesh, CGAL::parameters::use_binary_mode(true));
     }
 
+    auto dedup_start = append_end;
+    deduplicate_points(points, polygons);
+    deduplicate_polygons(polygons);
+    auto dedup_end = std::chrono::high_resolution_clock::now();
+
+    auto repair_start = dedup_end;
     PMP::repair_polygon_soup(points, polygons);
 
     size_t removed_non_manifold = PolygonSoupRepair::remove_non_manifold_polygons(polygons);
     if (verbose && removed_non_manifold > 0) {
-        std::cerr << "[Merge] Removed " << removed_non_manifold << " non-manifold polygon(s)\n";
+        logWarn(LogCategory::Fill,
+                "[Merge] Removed " + std::to_string(removed_non_manifold) + " non-manifold polygon(s)");
     }
+    auto repair_end = std::chrono::high_resolution_clock::now();
 
+    auto orient_start = repair_end;
+
+#if false
     bool oriented = PMP::orient_polygon_soup(points, polygons);
     if (verbose && !oriented) {
-        std::cerr << "[Merge] Warning: Some points were duplicated during orientation\n";
+        logWarn(LogCategory::Fill, "[Merge] Warning: Some points were duplicated during orientation");
     }
+    auto orient_end = std::chrono::high_resolution_clock::now();
+#else
+    auto orient_end = orient_start;
+#endif
 
+#if false
+    auto validation_result = validate_polygon_soup_basic(points, polygons);
+    if (verbose) {
+        if (validation_result.polygons_removed_total == 0) {
+            logInfo(LogCategory::Fill, "[Merge] Soup validation: no additional issues found");
+        } else {
+            std::ostringstream validation_msg;
+            validation_msg << "[Merge] Soup validation removed " << validation_result.polygons_removed_total
+                           << " polygon(s)"
+                           << " [out_of_bounds=" << validation_result.polygons_removed_out_of_bounds
+                           << ", invalid_cycle=" << validation_result.polygons_removed_invalid_cycle
+                           << ", edge_orientation=" << validation_result.polygons_removed_edge_orientation
+                           << ", non_manifold=" << validation_result.polygons_removed_non_manifold
+                           << ", passes=" << validation_result.passes_executed << "]";
+            logWarn(LogCategory::Fill, validation_msg.str());
+        }
+    }
+    if (timings) {
+        timings->validation_removed          = validation_result.polygons_removed_total;
+        timings->validation_out_of_bounds    = validation_result.polygons_removed_out_of_bounds;
+        timings->validation_invalid_cycle    = validation_result.polygons_removed_invalid_cycle;
+        timings->validation_edge_orientation = validation_result.polygons_removed_edge_orientation;
+        timings->validation_non_manifold     = validation_result.polygons_removed_non_manifold;
+        timings->validation_passes           = validation_result.passes_executed;
+    }
+#endif
+
+    auto convert_start = orient_end;
     Mesh merged;
     PMP::polygon_soup_to_polygon_mesh(points, polygons, merged);
+    auto convert_end = std::chrono::high_resolution_clock::now();
 
     if (holes_only && debug_dump) {
         std::string debug_file = DebugPath::step_file("merged_partitions_holes_only");
@@ -392,8 +556,19 @@ mesh_merger_merge(const Mesh& original_mesh, const std::vector<Submesh>& submesh
     }
 
     if (verbose) {
-        std::cerr << "[Merge] Final mesh: " << merged.number_of_vertices() << " vertices, " << merged.number_of_faces()
-                  << " faces\n";
+        logInfo(LogCategory::Fill, "[Merge] Final mesh: " + std::to_string(merged.number_of_vertices()) + " vertices, "
+                                       + std::to_string(merged.number_of_faces()) + " faces");
+    }
+
+    if (timings) {
+        timings->copy_base_ms = std::chrono::duration<double, std::milli>(copy_end - copy_start).count();
+        timings->append_ms    = std::chrono::duration<double, std::milli>(append_end - append_start).count();
+        timings->dedup_ms     = std::chrono::duration<double, std::milli>(dedup_end - dedup_start).count();
+        timings->repair_ms    = std::chrono::duration<double, std::milli>(repair_end - repair_start).count();
+        timings->orient_ms    = std::chrono::duration<double, std::milli>(orient_end - orient_start).count();
+        timings->convert_ms   = std::chrono::duration<double, std::milli>(convert_end - convert_start).count();
+        auto total_end        = std::chrono::high_resolution_clock::now();
+        timings->total_ms     = std::chrono::duration<double, std::milli>(total_end - total_start).count();
     }
 
     return merged;

@@ -1,5 +1,7 @@
 #include "progress_reporter.h"
+#include "include/logger.h"
 #include <iomanip>
+#include <sstream>
 
 namespace MeshRepair {
 
@@ -14,7 +16,7 @@ ProgressReporter::start(size_t total_steps, const std::string& operation_name)
     last_reported_percentage_ = 0;
     start_time_               = std::chrono::high_resolution_clock::now();
 
-    std::cerr << "\n[" << operation_name_ << "] Starting...\n";
+    logInfo(LogCategory::Progress, "[" + operation_name_ + "] Starting...");
 }
 
 void
@@ -45,8 +47,10 @@ ProgressReporter::finish()
     auto end_time     = std::chrono::high_resolution_clock::now();
     double total_time = std::chrono::duration<double>(end_time - start_time_).count();
 
-    std::cerr << "[" << operation_name_ << "] Completed in " << std::fixed << std::setprecision(2) << total_time
-              << " seconds\n\n";
+    std::ostringstream oss;
+    oss << "[" << operation_name_ << "] Completed in " << std::fixed << std::setprecision(2) << total_time
+        << " seconds";
+    logInfo(LogCategory::Progress, oss.str());
 }
 
 void
@@ -55,34 +59,19 @@ ProgressReporter::report(const std::string& message)
     if (!enabled_)
         return;
 
-    std::cerr << "[" << operation_name_ << "] " << message << "\n";
+    logInfo(LogCategory::Progress, "[" + operation_name_ + "] " + message);
 }
 
 void
 ProgressReporter::print_progress_bar(size_t current, size_t total, double elapsed_seconds)
 {
-    const int bar_width = 50;
-    float progress      = static_cast<float>(current) / total;
-    int pos             = static_cast<int>(bar_width * progress);
+    float progress = static_cast<float>(current) / total;
 
-    std::cerr << "[";
-    for (int i = 0; i < bar_width; ++i) {
-        if (i < pos)
-            std::cerr << "=";
-        else if (i == pos)
-            std::cerr << ">";
-        else
-            std::cerr << " ";
-    }
+    std::ostringstream progress_msg;
+    progress_msg << "[" << operation_name_ << "] " << int(progress * 100.0f) << "% (" << current << "/" << total << ") "
+                 << std::fixed << std::setprecision(1) << elapsed_seconds << "s";
 
-    std::cerr << "] " << int(progress * 100.0) << "% "
-              << "(" << current << "/" << total << ") " << std::fixed << std::setprecision(1) << elapsed_seconds
-              << "s\r";
-    std::cerr.flush();
-
-    if (current == total) {
-        std::cerr << "\n";
-    }
+    logInfo(LogCategory::Progress, progress_msg.str());
 }
 
 }  // namespace MeshRepair

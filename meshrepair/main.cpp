@@ -1,10 +1,11 @@
 // Main entry point for meshrepair
 // Routes to CLI mode (default) or engine mode (--engine flag)
 
-#include <iostream>
 #include <cstring>
+#include <string>
 
 #include "include/help_printer.h"
+#include "include/logger.h"
 
 // Forward declarations
 int
@@ -15,6 +16,10 @@ engine_main(int argc, char** argv);
 int
 main(int argc, char** argv)
 {
+    MeshRepair::LoggerConfig log_cfg;
+    log_cfg.useStderr = false;
+    MeshRepair::initLogger(log_cfg);
+
     // Check for --engine flag (can be anywhere in args)
     bool engine_mode    = false;
     bool help_requested = (argc <= 1);
@@ -41,7 +46,7 @@ main(int argc, char** argv)
             return cli_main(argc, argv);
         }
     } catch (const std::exception& ex) {
-        std::cerr << "FATAL ERROR: " << ex.what() << std::endl;
+        MeshRepair::logError(MeshRepair::LogCategory::Cli, std::string("FATAL ERROR: ") + ex.what());
         return 1;
     }
 }

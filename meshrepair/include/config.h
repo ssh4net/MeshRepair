@@ -9,10 +9,19 @@ namespace Config {
 
     // Version information
 #define MESHREPAIR_VERSION_MAJOR 2
-#define MESHREPAIR_VERSION_MINOR 0
+#define MESHREPAIR_VERSION_MINOR 5
 #define MESHREPAIR_VERSION_PATCH 0
 #define MESHREPAIR_STRINGIFY_INNER(x) #x
 #define MESHREPAIR_STRINGIFY(x) MESHREPAIR_STRINGIFY_INNER(x)
+
+// Build configuration string (Debug/Release/etc.)
+#ifndef MESHREPAIR_BUILD_CONFIG
+#    ifdef NDEBUG
+#        define MESHREPAIR_BUILD_CONFIG "Release"
+#    else
+#        define MESHREPAIR_BUILD_CONFIG "Debug"
+#    endif
+#endif
 
     constexpr int VERSION_MAJOR   = MESHREPAIR_VERSION_MAJOR;
     constexpr int VERSION_MINOR   = MESHREPAIR_VERSION_MINOR;

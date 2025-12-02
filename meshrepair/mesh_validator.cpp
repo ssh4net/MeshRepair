@@ -1,7 +1,7 @@
 #include "mesh_validator.h"
 #include <CGAL/Polygon_mesh_processing/connected_components.h>
 #include <CGAL/bounding_box.h>
-#include <iostream>
+#include "include/logger.h"
 #include <sstream>
 
 namespace PMP = CGAL::Polygon_mesh_processing;
@@ -64,23 +64,24 @@ MeshValidator::get_bbox_diagonal(const Mesh& mesh)
 void
 MeshValidator::print_statistics(const Mesh& mesh, bool detailed)
 {
-    std::cerr << "\n=== Mesh Statistics ===\n";
-    std::cerr << "  Vertices: " << mesh.number_of_vertices() << "\n";
-    std::cerr << "  Faces: " << mesh.number_of_faces() << "\n";
-    std::cerr << "  Edges: " << mesh.number_of_edges() << "\n";
-    std::cerr << "  Halfedges: " << mesh.number_of_halfedges() << "\n";
+    std::ostringstream report;
+    report << "\n=== Mesh Statistics ===\n";
+    report << "  Vertices: " << mesh.number_of_vertices() << "\n";
+    report << "  Faces: " << mesh.number_of_faces() << "\n";
+    report << "  Edges: " << mesh.number_of_edges() << "\n";
+    report << "  Halfedges: " << mesh.number_of_halfedges() << "\n";
 
     if (detailed) {
-        std::cerr << "\n=== Validation ===\n";
-        std::cerr << "  Valid: " << (is_valid(mesh) ? "YES" : "NO") << "\n";
-        std::cerr << "  Triangle mesh: " << (is_triangle_mesh(mesh) ? "YES" : "NO") << "\n";
-        std::cerr << "  Closed (watertight): " << (is_closed(mesh) ? "YES" : "NO") << "\n";
+        report << "\n=== Validation ===\n";
+        report << "  Valid: " << (is_valid(mesh) ? "YES" : "NO") << "\n";
+        report << "  Triangle mesh: " << (is_triangle_mesh(mesh) ? "YES" : "NO") << "\n";
+        report << "  Closed (watertight): " << (is_closed(mesh) ? "YES" : "NO") << "\n";
 
         size_t num_components = count_connected_components(mesh);
-        std::cerr << "  Connected components: " << num_components << "\n";
+        report << "  Connected components: " << num_components << "\n";
 
         double diagonal = get_bbox_diagonal(mesh);
-        std::cerr << "  Bounding box diagonal: " << diagonal << "\n";
+        report << "  Bounding box diagonal: " << diagonal << "\n";
 
         // Count border edges
         size_t border_edges = 0;
@@ -89,10 +90,12 @@ MeshValidator::print_statistics(const Mesh& mesh, bool detailed)
                 ++border_edges;
             }
         }
-        std::cerr << "  Border edges: " << border_edges << "\n";
+        report << "  Border edges: " << border_edges << "\n";
     }
 
-    std::cerr << "=======================\n\n";
+    report << "=======================\n";
+
+    logInfo(LogCategory::Cli, report.str());
 }
 
 std::string
