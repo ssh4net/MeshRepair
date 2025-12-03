@@ -242,6 +242,11 @@ meshrepair model.obj fixed.obj --max-boundary 500
 meshrepair model.obj fixed.obj --max-diameter 0.05
 ```
 
+Notes:
+- `--max-diameter` is measured against the **full mesh** bounding-box diagonal; the value is cached before partitioning so submeshes use the same reference.
+- For very large openings, pass values >1.0 to allow holes larger than the overall mesh diagonal.
+- Verbosity ≥2 will log when a hole is skipped because it exceeded either guard.
+
 ### Preprocessing Control
 
 ```bash

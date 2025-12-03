@@ -283,7 +283,7 @@ The Hole Filling panel is open by default; use it to access algorithm parameters
 | **Max Boundary** | 1000 | Maximum hole boundary vertices |
 | **Max Diameter** | 0.1 | Maximum diameter as ratio of mesh bbox |
 
-Holes exceeding these limits are skipped.
+Holes exceeding these limits are skipped. The diameter check uses the **full object** bounding-box diagonal cached before partitioning, so threaded fills and edit-mode scopes use the same reference. For very large openings, increase Max Diameter above 1.0.
 
 ### Quality Parameters
 

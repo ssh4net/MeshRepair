@@ -7,6 +7,7 @@ A cross-platform CLI tool for filling holes in triangle meshes using CGAL's impl
 - **Robust Hole Filling**: Uses constrained Delaunay triangulation (2D/3D) with automatic fallback
 - **Laplacian Fairing**: Smooth blending with configurable continuity (C⁰, C¹, C²)
 - **Partitioned Parallel Filling**: Default mode balances work across threads, capping partitions to hole count and edge budget
+- **Global Hole Size Guards**: Max-diameter checks use the full mesh bounding box (partition-safe) to avoid over-skipping large holes
 - **Tunable Workload**: Minimum-edges threshold per partition (`--min-edges`) to avoid oversharding tiny holes
 - **Multi-Format Support**: OBJ, PLY, OFF formats
 - **Scalable**: Optimized for meshes with millions of polygons
@@ -32,6 +33,13 @@ Based on:
 - CMake 3.12+
 - CGAL (located at `/mnt/e/GH/cgal/` or set `CGAL_DIR`)
 - Eigen3 3.2+ (located at `/mnt/e/UBS/include/eigen3/` or set `EIGEN3_INCLUDE_DIR`)
+
+### Dependencies
+
+- **Required**: CGAL, Eigen3
+- **Engine IPC**: nlohmann/json (fetched automatically if missing)
+- **Fast OBJ loading**: RapidOBJ (header-only, optional; falls back to CGAL loader)
+- **Logging**: spdlog (optional; falls back to std::ostream logger)
 
 ### Build Steps
 
@@ -96,6 +104,10 @@ make -j$(sysctl -n hw.ncpu)
     --validate
 ```
 
+`--max-boundary` limits boundary vertex count. `--max-diameter` caps hole diameter relative to the *full mesh* bounding-box diagonal (cached before partitioning so all threads use the same reference). Use values >1.0 for openings larger than the overall mesh diagonal.
+
+Engine/Blender integration uses the same guards (`max_boundary`, `max_diameter`) and the cached full-mesh diagonal so partitioned fills behave consistently across the CLI, engine API, and Blender addon.
+
 ## Command-Line Options
 
 | Option | Description | Default |
@@ -116,18 +128,19 @@ make -j$(sysctl -n hw.ncpu)
 | `--min-edges <n>` | Minimum boundary edges to justify a partition | 100 |
 | `--no-partition` | Use legacy (single-mesh) pipeline | partitioned |
 | `--cgal-loader` | Force CGAL OBJ loader | RapidOBJ/auto |
+| `--temp-dir <path>` | Directory for debug/intermediate dumps (verbosity 4) | system temp |
 
 ### Preprocessing Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--preprocess` | Enable all preprocessing steps | off |
+| `--preprocess / --no-preprocess` | Enable or disable preprocessing pipeline | on |
 | `--no-remove-duplicates` | Disable duplicate vertex removal | enabled |
 | `--no-remove-non-manifold` | Disable non-manifold vertex removal | enabled |
 | `--no-remove-isolated` | Disable isolated vertex cleanup | enabled |
 | `--no-remove-small` | Disable small component removal | enabled |
-| `--non-manifold-passes <n>` | Number of non-manifold removal passes | 2 |
-| `--debug` | Dump intermediate meshes as binary PLY | off |
+| `--non-manifold-passes <n>` | Number of non-manifold removal passes | 10 |
+| Verbosity 4 | Dump intermediate meshes as binary PLY | off |
 
 ## Performance
 

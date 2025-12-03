@@ -81,6 +81,7 @@ Photogrammetry (RealityScan, Metashape, 3DF Zephir, ...)
 | **Command Line Interface** | Batch processing and scripting support |
 | **Multi-threaded Processing** | Parallel hole filling with partition count capped by hole count |
 | **Partition Tuning** | Minimum edge budget per partition (`--min-edges`) to avoid oversharding tiny holes |
+| **Global Hole Size Guards** | Diameter limits use the full mesh bounding box even when partitioned |
 
 ---
 
