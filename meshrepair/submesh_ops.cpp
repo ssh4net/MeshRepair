@@ -466,7 +466,7 @@ mesh_merger_merge(const Mesh& original_mesh, const std::vector<Submesh>& submesh
     }
 
     // Debug dump: raw combined soup before repair/orient
-    if (verbose || debug_dump) {
+    if (debug_dump) {
         auto debug_points   = points;
         auto debug_polygons = polygons;
 #if false

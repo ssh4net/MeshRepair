@@ -14,14 +14,13 @@ project(MeshRepair
     LANGUAGES CXX
 )
 
-# Require at least C++20, but allow user override via CMAKE_CXX_STANDARD
-if(NOT DEFINED CMAKE_CXX_STANDARD)
-    set(CMAKE_CXX_STANDARD 20)
-elseif(CMAKE_CXX_STANDARD LESS 20)
-    set(CMAKE_CXX_STANDARD 20)
+# Require C++20 (spdlog uses std::format) and cache the settings
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard")
+if(CMAKE_CXX_STANDARD LESS 20)
+    message(FATAL_ERROR "CMAKE_CXX_STANDARD must be >= 20 (required by spdlog/std::format).")
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Enable compiler-specific extensions")
 
 # Cache variables for portable configuration
 if(NOT DEFINED CMAKE_INSTALL_PREFIX OR CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -65,11 +64,21 @@ option(BUILD_TESTS "Build test suite" ON)
 option(ENABLE_OPENMP "Enable OpenMP for parallel processing" ON)
 option(ENABLE_TBB "Enable oneTBB for parallel processing" ON)
 option(MESHREPAIR_USE_SPDLOG "Use spdlog for logging (if available)" ON)
+option(BUILD_MESHREPAIR_GUI "Build MeshRepair GUI (GLFW + ImGui)" ON)
 
 # Platform-specific settings
 if(WIN32)
     add_definitions(-DNOMINMAX)
     add_definitions(-D_USE_MATH_DEFINES)
+endif()
+
+set(MESHREPAIR_LIBCXX_FLAG "" CACHE INTERNAL "Use libc++ when building with Clang")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT MSVC)
+    set(MESHREPAIR_LIBCXX_FLAG -stdlib=libc++ CACHE INTERNAL "Use libc++ when building with Clang" FORCE)
+endif()
+if(MESHREPAIR_LIBCXX_FLAG)
+    add_compile_options(${MESHREPAIR_LIBCXX_FLAG})
+    add_link_options(${MESHREPAIR_LIBCXX_FLAG})
 endif()
 
 # Find CGAL
@@ -168,7 +177,14 @@ if(MESHREPAIR_USE_SPDLOG)
     find_package(spdlog QUIET CONFIG)
     if(spdlog_FOUND)
         set(MESHREPAIR_HAS_SPDLOG ON)
-        message(STATUS "spdlog: found (${spdlog_DIR})")
+        set(SPDLOG_TARGET spdlog::spdlog)
+        if(TARGET spdlog::spdlog_header_only)
+            # Prefer header-only to avoid ABI mismatches with prebuilt libs
+            set(SPDLOG_TARGET spdlog::spdlog_header_only)
+            message(STATUS "spdlog: found (${spdlog_DIR}) - using header-only target")
+        else()
+            message(STATUS "spdlog: found (${spdlog_DIR})")
+        endif()
     else()
         message(STATUS "spdlog: NOT found - falling back to std::ostream logger")
     endif()
@@ -273,6 +289,7 @@ set(MESHREPAIR_SOURCES
     meshrepair/pipeline_ops.cpp
     meshrepair/submesh_ops.cpp
     meshrepair/polygon_soup_validation.cpp
+    meshrepair/local_batch_queue.cpp
 )
 
 # Header files
@@ -297,6 +314,7 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/pipeline_ops.h
     meshrepair/include/parallel_utils.h
     meshrepair/include/parallel_detection.h
+    meshrepair/include/local_batch_queue.h
     meshrepair/include/submesh_ops.h
     meshrepair/include/hole_ops.h
     meshrepair/include/thread_safe_cout.h
@@ -304,15 +322,17 @@ set(MESHREPAIR_HEADERS
     meshrepair/include/logger.h
 )
 
-# Main executable
-add_executable(meshrepair
-    ${MESHREPAIR_SOURCES}
+# Core library shared by CLI and GUI
+set(MESHREPAIR_CORE_SOURCES ${MESHREPAIR_SOURCES})
+list(REMOVE_ITEM MESHREPAIR_CORE_SOURCES meshrepair/main.cpp)
+
+add_library(meshrepair_core STATIC
+    ${MESHREPAIR_CORE_SOURCES}
     ${MESHREPAIR_HEADERS}
 )
 
-# Link libraries
-target_link_libraries(meshrepair
-    PRIVATE
+target_link_libraries(meshrepair_core
+    PUBLIC
         CGAL::CGAL
         Eigen3::Eigen
         Threads::Threads
@@ -320,23 +340,30 @@ target_link_libraries(meshrepair
 )
 
 if(MESHREPAIR_HAS_SPDLOG)
-    target_link_libraries(meshrepair PRIVATE spdlog::spdlog)
-    target_compile_definitions(meshrepair PRIVATE MESHREPAIR_USE_SPDLOG SPDLOG_USE_STD_FORMAT)
+    target_link_libraries(meshrepair_core PRIVATE ${SPDLOG_TARGET})
+    target_compile_definitions(meshrepair_core PRIVATE MESHREPAIR_USE_SPDLOG SPDLOG_USE_STD_FORMAT)
 endif()
 
 if(RapidOBJ_FOUND)
-    target_link_libraries(meshrepair PRIVATE RapidOBJ::RapidOBJ)
+    target_link_libraries(meshrepair_core PRIVATE RapidOBJ::RapidOBJ)
 endif()
 
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(meshrepair PRIVATE OpenMP::OpenMP_CXX)
-    target_compile_definitions(meshrepair PRIVATE USE_OPENMP)
+    target_link_libraries(meshrepair_core PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_definitions(meshrepair_core PRIVATE USE_OPENMP)
 endif()
 
 if(MESHREPAIR_HAS_TBB)
-    target_link_libraries(meshrepair PRIVATE TBB::tbb)
-    target_compile_definitions(meshrepair PRIVATE CGAL_LINKED_WITH_TBB)
+    target_link_libraries(meshrepair_core PRIVATE TBB::tbb)
+    target_compile_definitions(meshrepair_core PRIVATE CGAL_LINKED_WITH_TBB)
 endif()
+
+# Main executable
+add_executable(meshrepair
+    meshrepair/main.cpp
+)
+
+target_link_libraries(meshrepair PRIVATE meshrepair_core)
 
 # Optional performance toggles
 option(MESHREPAIR_ENABLE_NATIVE_ARCH "Enable -march=native (/arch:AVX2 on MSVC) in Release builds" ON)
@@ -348,24 +375,29 @@ if(WIN32)
 endif()
 
 # Compiler-specific optimizations (configuration-aware for multi-config generators)
+set(_meshrepair_compile_targets meshrepair_core meshrepair)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # GCC/Clang flags
     set(native_flag $<$<AND:$<CONFIG:Release>,$<BOOL:${MESHREPAIR_ENABLE_NATIVE_ARCH}>>:-march=native>)
     set(lto_flag $<$<AND:$<CONFIG:Release>,$<BOOL:${MESHREPAIR_ENABLE_LTO}>>:-flto>)
 
-    target_compile_options(meshrepair PRIVATE
-        -Wall
-        -Wextra
-        $<$<CONFIG:Release>:-O3>
-        ${native_flag}
-        ${lto_flag}
-        $<$<CONFIG:Debug>:-g>
-        $<$<CONFIG:Debug>:-Wpedantic>
-    )
+    foreach(_tgt ${_meshrepair_compile_targets})
+        if(TARGET ${_tgt})
+            target_compile_options(${_tgt} PRIVATE
+                -Wall
+                -Wextra
+                $<$<CONFIG:Release>:-O3>
+                ${native_flag}
+                ${lto_flag}
+                $<$<CONFIG:Debug>:-g>
+                $<$<CONFIG:Debug>:-Wpedantic>
+            )
 
-    if(MESHREPAIR_ENABLE_LTO)
-        target_link_options(meshrepair PRIVATE ${lto_flag})
-    endif()
+            if(MESHREPAIR_ENABLE_LTO)
+                target_link_options(${_tgt} PRIVATE ${lto_flag})
+            endif()
+        endif()
+    endforeach()
 elseif(MSVC)
     # MSVC/clang-cl flags (supports multi-config generators like Visual Studio)
     set(is_clang_cl FALSE)
@@ -396,29 +428,40 @@ elseif(MSVC)
         set(msvc_lto_flag $<$<AND:$<CONFIG:Release>,$<BOOL:${MESHREPAIR_ENABLE_LTO}>>:/GL>)
     endif()
 
-    target_compile_options(meshrepair PRIVATE
-        /W4
-        $<$<CONFIG:Release>:/O2>
-        ${msvc_lto_flag}
-        ${msvc_native_flag}
-        $<$<CONFIG:Debug>:/Zi>
-    )
+    foreach(_tgt ${_meshrepair_compile_targets})
+        if(TARGET ${_tgt})
+            target_compile_options(${_tgt} PRIVATE
+                /W4
+                /permissive-
+                /EHsc
+                /MP
+                ${msvc_native_flag}
+                $<$<CONFIG:Release>:/O2>
+                $<$<CONFIG:Debug>:/Zi>
+                ${msvc_lto_flag}
+            )
 
-    # Link-time code generation for Release
-    if(MESHREPAIR_ENABLE_LTO)
-        if(is_clang_cl)
-            target_link_options(meshrepair PRIVATE ${msvc_lto_flag})
-        else()
-            target_link_options(meshrepair PRIVATE
-                $<$<CONFIG:Release>:/LTCG>
+            # Link-time code generation for Release
+            if(MESHREPAIR_ENABLE_LTO)
+                if(is_clang_cl)
+                    target_link_options(${_tgt} PRIVATE ${msvc_lto_flag})
+                else()
+                    target_link_options(${_tgt} PRIVATE
+                        $<$<CONFIG:Release>:/LTCG>
+                    )
+                endif()
+            endif()
+
+            set_target_properties(${_tgt} PROPERTIES
+                DEBUG_POSTFIX "${CMAKE_DEBUG_POSTFIX}"
             )
         endif()
-    endif()
+    endforeach()
+endif()
 
-    # Apply debug postfix
-    set_target_properties(meshrepair PROPERTIES
-        DEBUG_POSTFIX "${CMAKE_DEBUG_POSTFIX}"
-    )
+if(BUILD_MESHREPAIR_GUI)
+    add_subdirectory(dnd_glfw)
+    add_subdirectory(meshrepair-gui)
 endif()
 
 # Installation
@@ -468,7 +511,7 @@ else()
 endif()
 if(MESHREPAIR_USE_SPDLOG)
     if(MESHREPAIR_HAS_SPDLOG)
-        message(STATUS "  spdlog: ENABLED (using spdlog::spdlog)")
+        message(STATUS "  spdlog: ENABLED (using ${SPDLOG_TARGET})")
     else()
         message(STATUS "  spdlog: ENABLED but NOT FOUND (using fallback logger)")
     endif()
@@ -484,6 +527,7 @@ message(STATUS "  nlohmann/json: found (required for engine IPC mode)")
 message(STATUS "")
 message(STATUS "Options:")
 message(STATUS "  Build tests: ${BUILD_TESTS}")
+message(STATUS "  Build GUI: ${BUILD_MESHREPAIR_GUI}")
 message(STATUS "  Shared libs: ${BUILD_SHARED_LIBS}")
 message(STATUS "  Install prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "  Debug postfix: ${CMAKE_DEBUG_POSTFIX}")

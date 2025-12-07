@@ -17,6 +17,8 @@ namespace {
 #if defined(MESHREPAIR_USE_SPDLOG)
     std::atomic<bool> g_loggerConfigured { false };
 #endif
+    std::string g_prefix;
+    bool g_useColors = true;
 
     const char* categoryToString(LogCategory category)
     {
@@ -63,13 +65,21 @@ void
 initLogger(const LoggerConfig& config)
 {
     g_minLevel.store(config.minLevel, std::memory_order_relaxed);
+    g_prefix = config.prefix;
+    g_useColors = config.useColors;
 
 #if defined(MESHREPAIR_USE_SPDLOG)
     const std::string logger_name = "meshrepair";
     spdlog::drop(logger_name);
 
-    auto logger = config.useStderr ? spdlog::stderr_color_mt(logger_name) : spdlog::stdout_color_mt(logger_name);
-    logger->set_pattern("%^%l:%$ %v");
+    std::shared_ptr<spdlog::logger> logger;
+    logger = config.useStderr ? spdlog::stderr_color_mt(logger_name) : spdlog::stdout_color_mt(logger_name);
+
+    std::string basePattern = config.useColors ? "%^%l:%$ %v" : "%l: %v";
+    if (!g_prefix.empty()) {
+        basePattern = g_prefix + " " + basePattern;
+    }
+    logger->set_pattern(basePattern);
     logger->set_level(toSpdMinLevel(config.minLevel));
     logger->flush_on(spdlog::level::err);
     spdlog::set_level(toSpdMinLevel(config.minLevel));
@@ -138,6 +148,9 @@ logMessage(LogCategory category, LogLevel level, std::string_view message)
     }
 
     std::ostream& os = std::cerr;
+    if (!g_prefix.empty()) {
+        os << g_prefix << " ";
+    }
     os << "[" << levelStr << "] " << prefix << ": " << message << '\n';
 }
 

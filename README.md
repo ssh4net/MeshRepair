@@ -137,6 +137,7 @@ Engine/Blender integration uses the same guards (`max_boundary`, `max_diameter`)
 | `--preprocess / --no-preprocess` | Enable or disable preprocessing pipeline | on |
 | `--no-remove-duplicates` | Disable duplicate vertex removal | enabled |
 | `--no-remove-non-manifold` | Disable non-manifold vertex removal | enabled |
+| `--remove-long-edges <r>` | Remove polygons with any edge longer than `r` × mesh bbox diagonal (disabled by default) | off |
 | `--no-remove-isolated` | Disable isolated vertex cleanup | enabled |
 | `--no-remove-small` | Disable small component removal | enabled |
 | `--non-manifold-passes <n>` | Number of non-manifold removal passes | 10 |

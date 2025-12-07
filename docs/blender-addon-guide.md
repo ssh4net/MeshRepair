@@ -262,6 +262,7 @@ The Preprocessing panel is open by default; use it to access cleanup settings:
 | **Remove 3-Face Fans** | Collapse degenerate configurations | Enabled |
 | **Remove Isolated** | Delete unconnected vertices | Enabled |
 | **Keep Largest Only** | Remove small disconnected components | Disabled |
+| **Remove Long Edges** | Remove polygons containing edges above a length ratio threshold | Disabled |
 
 ### Advanced Parameters
 
@@ -269,6 +270,7 @@ The Preprocessing panel is open by default; use it to access cleanup settings:
 |-----------|---------|-------|-------------|
 | **Non-Manifold Depth** | 10 | 1-20 | Search recursion limit |
 | **Duplicate Threshold** | 0.0001 | 0.0-1.0 | Distance for coincidence detection |
+| **Max Edge Ratio** | 0.125 | 0.0-10.0 | When *Remove Long Edges* is enabled, edges longer than this fraction of the object bounding-box diagonal mark their polygons for removal |
 
 ---
 
@@ -332,6 +334,7 @@ After operations, the **Results & Statistics** panel (between Engine Status and 
 |-----------|-------------|
 | **Duplicates** | Vertices merged |
 | **Non-manifold** | Invalid geometry removed |
+| **Long-edge Polygons** | Polygons removed due to edges exceeding the configured max edge ratio |
 | **3-Face Fans** | Configurations collapsed |
 | **Isolated** | Unconnected vertices removed |
 

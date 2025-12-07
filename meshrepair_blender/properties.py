@@ -92,6 +92,21 @@ class MeshRepairSceneProperties(PropertyGroup):
         default=False
     )
 
+    preprocess_remove_long_edges: BoolProperty(
+        name="Remove Long Edges",
+        description="Remove polygons that contain edges longer than a threshold",
+        default=False
+    )
+
+    preprocess_max_edge_ratio: FloatProperty(
+        name="Max Edge Ratio",
+        description="Edges longer than this fraction of the mesh bounding box diagonal will be removed",
+        default=0.125,
+        min=0.0,
+        max=10.0,
+        precision=3
+    )
+
     preprocess_nm_passes: IntProperty(
         name="Non-Manifold Max Depth",
         description="Maximum recursion depth for local non-manifold removal (typically converges in 2-3 iterations)",
@@ -180,6 +195,7 @@ class MeshRepairSceneProperties(PropertyGroup):
     last_non_manifold_count: IntProperty(default=0)
     last_3_face_fan_count: IntProperty(default=0)
     last_isolated_count: IntProperty(default=0)
+    last_long_edge_count: IntProperty(default=0)
 
     # Hole filling results
     last_hole_stats: BoolProperty(default=False)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string_view>
+#include <string>
 
 namespace MeshRepair {
 
@@ -25,6 +26,8 @@ struct LoggerConfig {
     LogLevel minLevel = LogLevel::Info;
     bool useStderr    = true;
     bool async        = true;
+    bool useColors    = true;
+    std::string prefix;
 };
 
 void

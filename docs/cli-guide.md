@@ -255,7 +255,12 @@ meshrepair model.obj fixed.obj --no-preprocess
 
 # Selective preprocessing
 meshrepair model.obj fixed.obj --no-remove-non-manifold --no-remove-3facefan
+
+# Remove polygons with long edges (relative to bbox)
+meshrepair model.obj fixed.obj --remove-long-edges 0.25
 ```
+
+`--remove-long-edges <r>` removes any polygon whose edge length exceeds `r` times the mesh bounding-box diagonal. The diagonal is computed once on the full mesh before partitioning so all threads and partitions use the same reference. Use small ratios (e.g. 0.1–0.3) to aggressively prune stray “spike” triangles or extremely stretched polygons; leave this option off for CAD-like meshes where long edges are intentional.
 
 ### Algorithm Selection
 

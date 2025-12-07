@@ -487,12 +487,14 @@ namespace Engine {
         nlohmann::json stats;
         stats["duplicates_merged"]             = preprocess_stats_.duplicates_merged;
         stats["non_manifold_vertices_removed"] = preprocess_stats_.non_manifold_vertices_removed;
+        stats["long_edge_polygons_removed"]    = preprocess_stats_.long_edge_polygons_removed;
         stats["face_fans_collapsed"]           = preprocess_stats_.face_fans_collapsed;
         stats["isolated_vertices_removed"]     = preprocess_stats_.isolated_vertices_removed;
         stats["small_components_removed"]      = preprocess_stats_.small_components_removed;
         stats["connected_components_found"]    = preprocess_stats_.connected_components_found;
         stats["total_time_ms"]                 = preprocess_stats_.total_time_ms;
         stats["soup_cleanup_time_ms"]          = preprocess_stats_.soup_cleanup_time_ms;
+        stats["long_edge_time_ms"]             = preprocess_stats_.long_edge_time_ms;
         stats["soup_to_mesh_time_ms"]          = preprocess_stats_.soup_to_mesh_time_ms;
         stats["mesh_cleanup_time_ms"]          = preprocess_stats_.mesh_cleanup_time_ms;
         return stats;

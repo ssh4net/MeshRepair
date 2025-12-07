@@ -10,20 +10,39 @@
 #include <CGAL/boost/graph/Euler_operations.h>
 #include <CGAL/boost/graph/helpers.h>
 #include <CGAL/IO/PLY.h>
+#include <CGAL/bounding_box.h>
 #include "debug_path.h"
 #include "include/logger.h"
+#include <algorithm>
 #include <chrono>
-#include <vector>
+#include <cmath>
+#include <iomanip>
 #include <map>
 #include <set>
-#include <algorithm>
-#include <iomanip>
 #include <string>
+#include <thread>
 #include <sstream>
+#include <vector>
 
 namespace PMP = CGAL::Polygon_mesh_processing;
 
 namespace MeshRepair {
+
+namespace {
+
+double
+compute_soup_bbox_diagonal(const std::vector<Point_3>& points)
+{
+    if (points.empty()) {
+        return 0.0;
+    }
+
+    auto bbox         = CGAL::bounding_box(points.begin(), points.end());
+    auto diag_squared = CGAL::squared_distance(bbox.min(), bbox.max());
+    return std::sqrt(CGAL::to_double(diag_squared));
+}
+
+}  // namespace
 
 MeshPreprocessor::MeshPreprocessor(Mesh& mesh, const PreprocessingOptions& options)
     : mesh_(mesh)
@@ -112,6 +131,8 @@ MeshPreprocessor::print_report() const
     logDetail(LogCategory::Preprocess, "Duplicate vertices merged: " + std::to_string(stats_.duplicates_merged));
     logDetail(LogCategory::Preprocess,
               "Non-manifold polygons removed: " + std::to_string(stats_.non_manifold_vertices_removed));
+    logDetail(LogCategory::Preprocess,
+              "Long-edge polygons removed: " + std::to_string(stats_.long_edge_polygons_removed));
     logDetail(LogCategory::Preprocess, "3-face fans collapsed: " + std::to_string(stats_.face_fans_collapsed));
     logDetail(LogCategory::Preprocess,
               "Isolated vertices removed: " + std::to_string(stats_.isolated_vertices_removed));
@@ -157,7 +178,7 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     // Step 1.1: Remove duplicate points
     if (options.remove_duplicates) {
         if (options.verbose) {
-            logDetail(LogCategory::Preprocess, "[1/6] Removing duplicate points...");
+            logDetail(LogCategory::Preprocess, "[1/7] Removing duplicate points...");
         }
         size_t points_before = soup.points.size();
         PMP::merge_duplicate_points_in_polygon_soup(soup.points, soup.polygons);
@@ -186,7 +207,7 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
     //
     // Step 1.3: Remove degenerate polygons
     if (options.verbose) {
-        logDetail(LogCategory::Preprocess, "[2/6] Removing degenerate polygons...");
+        logDetail(LogCategory::Preprocess, "[2/7] Removing degenerate polygons...");
     }
     size_t before_degenerate = soup.polygons.size();
     auto it = std::remove_if(soup.polygons.begin(), soup.polygons.end(), [](const std::vector<std::size_t>& poly) {
@@ -208,12 +229,113 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
                                   options.verbose);
     }
 
+    auto long_edge_start = std::chrono::high_resolution_clock::now();
+    //
+    // Step 1.4: Remove polygons with overly long edges (optional, disabled by default)
+    if (options.remove_long_edges && options.long_edge_max_ratio > 0.0) {
+        double bbox_diagonal = compute_soup_bbox_diagonal(soup.points);
+        if (bbox_diagonal > 0.0) {
+            double threshold       = options.long_edge_max_ratio * bbox_diagonal;
+            double threshold_sq    = threshold * threshold;
+            const size_t poly_count = soup.polygons.size();
+
+            if (options.verbose) {
+                std::ostringstream msg;
+                msg << "[3/7] Removing long-edge polygons (threshold=" << threshold << " units, ratio="
+                    << options.long_edge_max_ratio << " of bbox diagonal)";
+                logDetail(LogCategory::Preprocess, msg.str());
+            }
+
+            std::vector<uint8_t> remove_flags(poly_count, 0);
+            if (poly_count > 0) {
+                size_t hw_threads = std::thread::hardware_concurrency();
+                if (hw_threads == 0) {
+                    hw_threads = 4;
+                }
+                size_t thread_count = std::min(hw_threads, poly_count);
+                size_t chunk        = (poly_count + thread_count - 1) / thread_count;
+
+                auto worker = [&](size_t start, size_t end) {
+                    const auto& points   = soup.points;
+                    const auto& polygons = soup.polygons;
+
+                    for (size_t i = start; i < end; ++i) {
+                        const auto& poly = polygons[i];
+                        if (poly.size() < 2) {
+                            continue;
+                        }
+
+                        bool remove = false;
+                        const size_t n = poly.size();
+                        for (size_t j = 0; j < n; ++j) {
+                            std::size_t i0 = poly[j];
+                            std::size_t i1 = poly[(j + 1) % n];
+                            if (i0 >= points.size() || i1 >= points.size()) {
+                                continue;
+                            }
+                            double sq = CGAL::to_double(CGAL::squared_distance(points[i0], points[i1]));
+                            if (sq > threshold_sq) {
+                                remove = true;
+                                break;
+                            }
+                        }
+
+                        if (remove) {
+                            remove_flags[i] = 1;
+                        }
+                    }
+                };
+
+                std::vector<std::thread> threads;
+                threads.reserve(thread_count);
+                for (size_t t = 0; t < thread_count; ++t) {
+                    size_t start = t * chunk;
+                    if (start >= poly_count) {
+                        break;
+                    }
+                    size_t end = std::min(start + chunk, poly_count);
+                    threads.emplace_back(worker, start, end);
+                }
+
+                for (auto& th : threads) {
+                    if (th.joinable()) {
+                        th.join();
+                    }
+                }
+
+                std::vector<std::vector<std::size_t>> filtered;
+                filtered.reserve(poly_count);
+                size_t removed = 0;
+                for (size_t i = 0; i < poly_count; ++i) {
+                    if (remove_flags[i]) {
+                        ++removed;
+                    } else {
+                        filtered.push_back(std::move(soup.polygons[i]));
+                    }
+                }
+                soup.polygons.swap(filtered);
+                stats.long_edge_polygons_removed = removed;
+
+                if (options.verbose) {
+                    logDetail(LogCategory::Preprocess,
+                              "Removed: " + std::to_string(removed) + " long-edge polygon(s)");
+                }
+            }
+        }
+        if (options.debug) {
+            MeshPreprocessor::plyDump(soup, DebugPath::step_file("after_long_edges"),
+                                      "Saved soup (after long-edge removal)", options.verbose);
+        }
+    }
+    auto long_edge_end      = std::chrono::high_resolution_clock::now();
+    stats.long_edge_time_ms = std::chrono::duration<double, std::milli>(long_edge_end - long_edge_start).count();
+
     auto face_fans_start = std::chrono::high_resolution_clock::now();
     //
-    // Step 1.4: Remove 3-face fans
+    // Step 1.5: Remove 3-face fans
     if (options.remove_3_face_fans) {
         if (options.verbose) {
-            logDetail(LogCategory::Preprocess, "[3/6] Collapsing 3-face fans...");
+            logDetail(LogCategory::Preprocess, "[4/7] Collapsing 3-face fans...");
         }
         size_t fans_collapsed     = PolygonSoupRepair::remove_3_face_fans(soup.points, soup.polygons);
         stats.face_fans_collapsed = fans_collapsed;
@@ -231,11 +353,11 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
 
     auto non_manifold_start = std::chrono::high_resolution_clock::now();
     //
-    // Step 1.5: Remove non-manifold vertices/edges
+    // Step 1.6: Remove non-manifold vertices/edges
     if (options.remove_non_manifold) {
         if (options.verbose) {
             logDetail(LogCategory::Preprocess,
-                      "[4/6] Removing non-manifold vertices/edges (recursive local search)...");
+                      "[5/7] Removing non-manifold vertices/edges (recursive local search)...");
         }
         size_t max_depth = (options.non_manifold_passes > 0) ? options.non_manifold_passes : 10;
         auto nm_result   = PolygonSoupRepair::remove_non_manifold_polygons_detailed(soup.polygons, max_depth,
@@ -262,10 +384,10 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
 
     auto orient_start = non_manifold_end;
     //
-    // Step 1.6: Orient polygon soup (disabled for now)
+    // Step 1.7: Orient polygon soup (disabled for now)
 #if false
     if (options.verbose) {
-        logDetail(LogCategory::Preprocess, "[5/6] Orienting polygon soup...");
+        logDetail(LogCategory::Preprocess, "[6/7] Orienting polygon soup...");
     }
     bool oriented = PMP::orient_polygon_soup(soup.points, soup.polygons);
     if (options.verbose) {
@@ -430,6 +552,7 @@ MeshPreprocessor::preprocess_soup(PolygonSoup& soup, Mesh& output_mesh, const Pr
         }
         logDetail(LogCategory::Preprocess, "  Duplicates: " + std::to_string(stats.duplicates_time_ms) + " ms");
         logDetail(LogCategory::Preprocess, "  Degenerate: " + std::to_string(stats.degenerate_time_ms) + " ms");
+        logDetail(LogCategory::Preprocess, "  Long-edge: " + std::to_string(stats.long_edge_time_ms) + " ms");
         logDetail(LogCategory::Preprocess, "  Non-manifold: " + std::to_string(stats.non_manifold_time_ms) + " ms");
         logDetail(LogCategory::Preprocess, "  3-face fans: " + std::to_string(stats.face_fans_time_ms) + " ms");
         logDetail(LogCategory::Preprocess, "  Orient: " + std::to_string(stats.orient_time_ms) + " ms");

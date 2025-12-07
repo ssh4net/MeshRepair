@@ -58,6 +58,7 @@ print_help(const char* program_name)
          << "  --no-remove-duplicates Skip duplicate vertex removal\n"
          << "  --no-remove-non-manifold Skip non-manifold vertex removal\n"
          << "  --no-remove-3facefan   Skip 3-face fan collapsing\n"
+         << "  --remove-long-edges <r> Remove polygons with edges longer than r * mesh bbox diagonal (disabled by default)\n"
          << "  --no-remove-isolated   Skip isolated vertex removal\n"
          << "  --no-remove-small      Keep all components (no pruning)\n"
          << "  --non-manifold-passes <n> Number of non-manifold passes (default: 2)\n"

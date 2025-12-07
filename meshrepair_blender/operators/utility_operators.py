@@ -86,6 +86,7 @@ class MESHREPAIR_OT_clear_stats(Operator):
         props.last_non_manifold_count = 0
         props.last_3_face_fan_count = 0
         props.last_isolated_count = 0
+        props.last_long_edge_count = 0
 
         props.last_hole_stats = False
         props.last_hole_count = 0

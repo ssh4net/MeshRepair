@@ -19,6 +19,36 @@ namespace MeshRepair {
 
 namespace {
 
+    bool should_cancel(const PipelineContext& ctx)
+    {
+        if (ctx.cancel_flag && ctx.cancel_flag->load(std::memory_order_relaxed)) {
+            return true;
+        }
+        if (ctx.start_time && ctx.timeout_ms > 0.0) {
+            auto now     = std::chrono::steady_clock::now();
+            double spent = std::chrono::duration<double, std::milli>(now - *ctx.start_time).count();
+            if (spent > ctx.timeout_ms) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool should_cancel(const ParallelPipelineCtx& ctx)
+    {
+        if (ctx.cancel_flag && ctx.cancel_flag->load(std::memory_order_relaxed)) {
+            return true;
+        }
+        if (ctx.start_time && ctx.timeout_ms > 0.0) {
+            auto now     = std::chrono::steady_clock::now();
+            double spent = std::chrono::duration<double, std::milli>(now - *ctx.start_time).count();
+            if (spent > ctx.timeout_ms) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     struct ParallelLogEntry {
         uint64_t seq;
         LogLevel level;
@@ -115,6 +145,10 @@ namespace {
                 h_current = mesh.next(h_current);
             } while (h_current != h);
 
+            if (ctx.cancel_flag && ctx.cancel_flag->load(std::memory_order_relaxed)) {
+                break;
+            }
+
             hole_queue.push(hole);
             holes_detected.fetch_add(1);
 
@@ -138,11 +172,13 @@ namespace {
                           std::vector<HoleStatistics>& results, std::mutex& results_mutex,
                           ParallelLogBuffer* log_buffer)
     {
-        (void)detection_done;
-
         static std::mutex mesh_modification_mutex;
 
         while (true) {
+            if (should_cancel(ctx)) {
+                break;
+            }
+
             HoleInfo hole;
             if (!hole_queue.pop(hole)) {
                 break;
@@ -157,8 +193,9 @@ namespace {
                 non_verbose_opts.verbose        = false;
 
                 HoleFillerCtx fill_ctx;
-                fill_ctx.mesh    = ctx.mesh;
-                fill_ctx.options = non_verbose_opts;
+                fill_ctx.mesh         = ctx.mesh;
+                fill_ctx.options      = non_verbose_opts;
+                fill_ctx.cancel_flag  = ctx.cancel_flag;
 
                 stats = fill_hole_ctx(&fill_ctx, hole);
 
@@ -289,6 +326,10 @@ pipeline_process_pipeline(PipelineContext* ctx, bool verbose)
     }
 
     while (!detection_finished.load(std::memory_order_acquire)) {
+        if (should_cancel(*ctx)) {
+            hole_queue.finish();
+            break;
+        }
         std::this_thread::yield();
     }
 
@@ -333,6 +374,9 @@ pipeline_process_batch(PipelineContext* ctx, bool verbose)
 {
     MeshStatistics stats;
     if (!ctx || !ctx->mesh || !ctx->thread_mgr) {
+        return stats;
+    }
+    if (should_cancel(*ctx)) {
         return stats;
     }
 
@@ -384,6 +428,9 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     if (!ctx || !ctx->mesh || !ctx->thread_mgr) {
         return stats;
     }
+    if (should_cancel(*ctx)) {
+        return stats;
+    }
 
     Mesh& mesh                     = *ctx->mesh;
     ThreadManager& manager         = *ctx->thread_mgr;
@@ -408,6 +455,9 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     HoleDetectorCtx detect_ctx { &mesh, verbose };
     std::vector<HoleInfo> all_holes;
     detect_all_holes_ctx(detect_ctx, all_holes);
+    if (should_cancel(*ctx)) {
+        return stats;
+    }
     detect_end               = std::chrono::high_resolution_clock::now();
     stats.detection_time_ms  = std::chrono::duration<double, std::milli>(detect_end - detect_start).count();
     stats.num_holes_detected = all_holes.size();
@@ -442,6 +492,9 @@ parallel_fill_partitioned(ParallelPipelineCtx* ctx, bool verbose, bool debug)
     }
 
     for (const auto& hole : all_holes) {
+        if (should_cancel(*ctx)) {
+            break;
+        }
         if (hole.boundary_size > filling_options.max_hole_boundary_vertices) {
             oversized_skipped++;
             continue;

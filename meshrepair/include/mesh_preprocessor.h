@@ -15,6 +15,7 @@ struct PreprocessingStats {
     size_t duplicates_merged             = 0;
     size_t non_manifold_vertices_removed = 0;  // Non-manifold polygons removed in soup space
     size_t face_fans_collapsed           = 0;  // 3-face fans collapsed
+    size_t long_edge_polygons_removed    = 0;  // Polygons removed due to long edges
     size_t isolated_vertices_removed     = 0;
     size_t connected_components_found    = 0;  // Number of connected components found
     size_t small_components_removed      = 0;  // Number of small components removed
@@ -25,6 +26,7 @@ struct PreprocessingStats {
     double duplicates_time_ms   = 0.0;
     double degenerate_time_ms   = 0.0;
     double non_manifold_time_ms = 0.0;
+    double long_edge_time_ms    = 0.0;
     double face_fans_time_ms    = 0.0;
     double orient_time_ms       = 0.0;
     double soup_to_mesh_time_ms = 0.0;  // Time converting soup to mesh
@@ -33,7 +35,7 @@ struct PreprocessingStats {
     bool has_changes() const
     {
         return duplicates_merged > 0 || non_manifold_vertices_removed > 0 || face_fans_collapsed > 0
-               || isolated_vertices_removed > 0 || small_components_removed > 0;
+               || long_edge_polygons_removed > 0 || isolated_vertices_removed > 0 || small_components_removed > 0;
     }
 };
 
@@ -43,6 +45,8 @@ struct PreprocessingOptions {
     bool remove_3_face_fans     = true;  // Remove 3-triangle fans around single vertex
     bool remove_isolated        = true;
     bool keep_largest_component = true;  // Keep only largest connected component
+    bool remove_long_edges      = false; // Remove polygons with overly long edges (disabled by default)
+    double long_edge_max_ratio  = 0.125; // Edge length limit as fraction of mesh bbox diagonal
     size_t non_manifold_passes  = 10;    // Max recursion depth for local search (not global passes!)
     bool verbose                = false;
     bool debug                  = false;  // Dump intermediate meshes as binary PLY

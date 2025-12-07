@@ -237,6 +237,8 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
                 "remove_isolated": props.preprocess_remove_isolated,
                 "keep_largest_component": props.preprocess_keep_largest,
                 "non_manifold_passes": props.preprocess_nm_passes,
+                "remove_long_edges": props.preprocess_remove_long_edges,
+                "max_long_edge_ratio": props.preprocess_max_edge_ratio,
                 "duplicate_threshold": props.preprocess_duplicate_threshold
             }
 
@@ -258,6 +260,7 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
             props.last_non_manifold_count = stats.get('non_manifold_vertices_removed', 0)
             props.last_3_face_fan_count = stats.get('face_fans_collapsed', 0)
             props.last_isolated_count = stats.get('isolated_vertices_removed', 0)
+            props.last_long_edge_count = stats.get('long_edge_polygons_removed', 0)
 
             # Get result and import if requested
             if self.return_result:
@@ -287,6 +290,7 @@ class MESHREPAIR_OT_preprocess(MESHREPAIR_OT_Base):
 
             msg = f"Preprocessing complete: {props.last_duplicate_count} duplicates, " \
                   f"{props.last_non_manifold_count} non-manifold, " \
+                  f"{props.last_long_edge_count} long-edge polygons, " \
                   f"{props.last_isolated_count} isolated vertices removed ({elapsed_time:.1f}ms)"
             self.console_report('INFO', msg)
             return {'FINISHED'}
@@ -607,6 +611,8 @@ class MESHREPAIR_OT_repair_all(MESHREPAIR_OT_Base):
                     "remove_isolated": props.preprocess_remove_isolated,
                     "keep_largest_component": props.preprocess_keep_largest,
                     "non_manifold_passes": props.preprocess_nm_passes,
+                    "remove_long_edges": props.preprocess_remove_long_edges,
+                    "max_long_edge_ratio": props.preprocess_max_edge_ratio,
                     "duplicate_threshold": props.preprocess_duplicate_threshold
                 }
 

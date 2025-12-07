@@ -30,6 +30,8 @@ struct CommandLineArgs {
     bool validate      = false;
     bool ascii_ply     = false;  // Use ASCII PLY instead of binary
     bool per_hole_info = false;  // Print per-hole timing/details in stats output
+    bool use_colors    = true;
+    std::string proc_name;
 
     // Preprocessing options
     bool enable_preprocessing              = true;
@@ -39,6 +41,8 @@ struct CommandLineArgs {
     bool preprocess_remove_isolated        = true;
     bool preprocess_keep_largest_component = true;
     size_t non_manifold_passes             = 10;
+    bool preprocess_remove_long_edges      = false;
+    double preprocess_max_edge_ratio       = 0.125;
 
     // Threading options
     size_t num_threads   = 0;     // 0 = auto (hw_cores / 2)
@@ -124,6 +128,9 @@ struct CommandLineArgs {
                 preprocess_remove_isolated = false;
             } else if (arg == "--no-remove-small") {
                 preprocess_keep_largest_component = false;
+            } else if (arg == "--remove-long-edges" && i + 1 < argc) {
+                preprocess_remove_long_edges = true;
+                preprocess_max_edge_ratio    = std::stod(argv[++i]);
             } else if (arg == "--non-manifold-passes" && i + 1 < argc) {
                 non_manifold_passes = std::stoul(argv[++i]);
                 if (non_manifold_passes == 0) {
@@ -144,6 +151,10 @@ struct CommandLineArgs {
                 filling_options.min_partition_boundary_edges = std::stoul(argv[++i]);
             } else if (arg == "--cgal-loader") {
                 force_cgal_loader = true;
+            } else if (arg == "--no-color") {
+                use_colors = false;
+            } else if (arg == "--proc-name" && i + 1 < argc) {
+                proc_name = argv[++i];
             } else {
                 logError(LogCategory::Cli, "Unknown option: " + arg);
                 return false;
@@ -157,16 +168,18 @@ struct CommandLineArgs {
 int
 cli_main(int argc, char** argv)
 {
-    LoggerConfig log_cfg;
-    log_cfg.useStderr = false;
-    initLogger(log_cfg);
-
     // Parse command-line arguments
     CommandLineArgs args;
     if (!args.parse(argc, argv)) {
         print_help(argv[0]);
         return 1;
     }
+
+    LoggerConfig log_cfg;
+    log_cfg.useStderr = false;
+    log_cfg.useColors = args.use_colors;
+    log_cfg.prefix    = args.proc_name;
+    initLogger(log_cfg);
 
     if (!args.temp_dir.empty()) {
         DebugPath::set_base_directory(args.temp_dir);
@@ -190,7 +203,7 @@ cli_main(int argc, char** argv)
 
     if (args.verbosity > 0) {
         std::ostringstream banner;
-        banner << "=== MeshHoleFiller v" << Config::VERSION << " ===\n";
+        banner << "=== Mesh Repair v" << Config::VERSION << " ===\n";
         banner << MESHREPAIR_BUILD_CONFIG << " Build: " << Config::BUILD_DATE << " " << Config::BUILD_TIME;
         logInfo(LogCategory::Empty, banner.str());
     }
@@ -253,6 +266,8 @@ cli_main(int argc, char** argv)
         prep_opts.remove_isolated        = args.preprocess_remove_isolated;
         prep_opts.keep_largest_component = args.preprocess_keep_largest_component;
         prep_opts.non_manifold_passes    = args.non_manifold_passes;
+        prep_opts.remove_long_edges      = args.preprocess_remove_long_edges;
+        prep_opts.long_edge_max_ratio    = args.preprocess_max_edge_ratio;
         prep_opts.verbose                = verbose;
         prep_opts.debug                  = debug;
 
@@ -264,6 +279,7 @@ cli_main(int argc, char** argv)
             prep_report << "=== Preprocessing Report ===\n"
                         << "Duplicate vertices merged: " << prep_stats.duplicates_merged << "\n"
                         << "Non-manifold polygons removed: " << prep_stats.non_manifold_vertices_removed << "\n"
+                        << "Long-edge polygons removed: " << prep_stats.long_edge_polygons_removed << "\n"
                         << "3-face fans collapsed: " << prep_stats.face_fans_collapsed << "\n"
                         << "Isolated vertices removed: " << prep_stats.isolated_vertices_removed << "\n"
                         << "Connected components found: " << prep_stats.connected_components_found << "\n"
@@ -432,6 +448,9 @@ cli_main(int argc, char** argv)
         if (args.enable_preprocessing) {
             stats_report << "  Preprocessing:\n";
             stats_report << "    Soup cleanup: " << prep_stats.soup_cleanup_time_ms << " ms\n";
+            if (prep_stats.long_edge_time_ms > 0.0) {
+                stats_report << "      Long-edge removal: " << prep_stats.long_edge_time_ms << " ms\n";
+            }
             stats_report << "    Soup->Mesh conversion: " << prep_stats.soup_to_mesh_time_ms << " ms\n";
             stats_report << "    Mesh cleanup: " << prep_stats.mesh_cleanup_time_ms << " ms\n";
             stats_report << "    Subtotal: " << prep_stats.total_time_ms << " ms\n";

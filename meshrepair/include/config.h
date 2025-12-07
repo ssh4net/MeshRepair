@@ -9,7 +9,7 @@ namespace Config {
 
     // Version information
 #define MESHREPAIR_VERSION_MAJOR 2
-#define MESHREPAIR_VERSION_MINOR 5
+#define MESHREPAIR_VERSION_MINOR 7
 #define MESHREPAIR_VERSION_PATCH 0
 #define MESHREPAIR_STRINGIFY_INNER(x) #x
 #define MESHREPAIR_STRINGIFY(x) MESHREPAIR_STRINGIFY_INNER(x)
@@ -34,7 +34,7 @@ namespace Config {
 #undef MESHREPAIR_VERSION_PATCH
 #undef MESHREPAIR_VERSION_MINOR
 #undef MESHREPAIR_VERSION_MAJOR
-    constexpr const char* APP_NAME = "MeshHoleFiller";
+    constexpr const char* APP_NAME = "Mesh Repair";
 
     // Build information (updated at compile time)
     constexpr const char* BUILD_DATE = __DATE__;
