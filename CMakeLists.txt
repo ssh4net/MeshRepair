@@ -460,7 +460,7 @@ elseif(MSVC)
 endif()
 
 if(BUILD_MESHREPAIR_GUI)
-    add_subdirectory(dnd_glfw)
+    add_subdirectory(external/dnd_glfw)
     add_subdirectory(meshrepair-gui)
 endif()
 
