@@ -76,14 +76,14 @@ add_executable(meshrepair_gui
     include/mr_gui.h
 )
 
-set(MESHREPAIR_GUI_FONT "${CMAKE_SOURCE_DIR}/external/Fira/FiraSans-Regular.otf")
+set(MESHREPAIR_GUI_FONT "${CMAKE_SOURCE_DIR}/external/Fira/FiraSans-Medium.otf")
 if(NOT EXISTS "${MESHREPAIR_GUI_FONT}")
     message(FATAL_ERROR "Expected font not found at ${MESHREPAIR_GUI_FONT}")
 endif()
 
 add_custom_command(TARGET meshrepair_gui PRE_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fonts"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MESHREPAIR_GUI_FONT}" "${CMAKE_CURRENT_BINARY_DIR}/fonts/FiraSans-Regular.otf"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MESHREPAIR_GUI_FONT}" "${CMAKE_CURRENT_BINARY_DIR}/fonts/FiraSans-Medium.otf"
     COMMENT "Copy FiraSans font for runtime use")
 
 target_link_libraries(meshrepair_gui
