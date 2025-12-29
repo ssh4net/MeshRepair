@@ -365,6 +365,21 @@ add_executable(meshrepair
 
 target_link_libraries(meshrepair PRIVATE meshrepair_core)
 
+if(APPLE)
+    # Bundle-friendly rpaths:
+    # - .app layout: MeshRepair.app/Contents/MacOS/meshrepair loads deps from Contents/Frameworks
+    # - standalone layout: allow deps next to the executable too (e.g., bin/libtbb*.dylib)
+    set_target_properties(meshrepair PROPERTIES
+        BUILD_RPATH "@executable_path/../Frameworks;@executable_path"
+        INSTALL_RPATH "@executable_path/../Frameworks;@executable_path"
+        # Avoid embedding absolute build-tree rpaths (e.g. /Users/.../MOS/lib) which makes install non-idempotent.
+        SKIP_BUILD_RPATH TRUE
+        # Embed the install rpath at link time and avoid install_name_tool rpath edits (keeps install idempotent).
+        BUILD_WITH_INSTALL_RPATH TRUE
+        SKIP_INSTALL_RPATH TRUE
+    )
+endif()
+
 # Optional performance toggles
 option(MESHREPAIR_ENABLE_NATIVE_ARCH "Enable -march=native (/arch:AVX2 on MSVC) in Release builds" ON)
 option(MESHREPAIR_ENABLE_LTO "Enable link-time optimization in Release builds" ON)
@@ -465,9 +480,31 @@ if(BUILD_MESHREPAIR_GUI)
 endif()
 
 # Installation
-install(TARGETS meshrepair
-    RUNTIME DESTINATION bin
-)
+install(TARGETS meshrepair RUNTIME DESTINATION bin)
+
+if(APPLE)
+    # Also bundle the CLI/engine into the .app so external integrations (e.g., Blender addon)
+    # can point to a single canonical engine shipped with the app.
+    # Note: this duplicates the binary in bin/ for convenience.
+    install(TARGETS meshrepair RUNTIME DESTINATION "MeshRepair.app/Contents/MacOS")
+endif()
+
+if(APPLE AND TARGET TBB::tbb)
+    # Bundle oneTBB dylibs next to the executable so @rpath lookups succeed via @executable_path.
+    get_target_property(_tbb_location TBB::tbb IMPORTED_LOCATION)
+    if(NOT _tbb_location)
+        get_target_property(_tbb_location TBB::tbb IMPORTED_LOCATION_RELEASE)
+    endif()
+    if(_tbb_location)
+        get_filename_component(_tbb_dir "${_tbb_location}" DIRECTORY)
+        file(GLOB _tbb_dylibs "${_tbb_dir}/libtbb*.dylib")
+        if(_tbb_dylibs)
+            install(FILES ${_tbb_dylibs} DESTINATION bin)
+            # Also bundle for the .app/Contents/Frameworks so the bundled CLI can resolve deps.
+            install(FILES ${_tbb_dylibs} DESTINATION "MeshRepair.app/Contents/Frameworks")
+        endif()
+    endif()
+endif()
 
 # Tests
 if(BUILD_TESTS)

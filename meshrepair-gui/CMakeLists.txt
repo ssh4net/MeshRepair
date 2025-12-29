@@ -76,6 +76,73 @@ add_executable(meshrepair_gui
     include/mr_gui.h
 )
 
+if(APPLE)
+    # Build a proper .app bundle on macOS.
+    set_target_properties(meshrepair_gui PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME "MeshRepair"
+    )
+
+    # App icon (.icns) generated from PNG iconset sources.
+    set(_icon_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/icons")
+    set(_iconset_dir "${CMAKE_CURRENT_BINARY_DIR}/MeshRepair.iconset")
+    set(_icns_file   "${CMAKE_CURRENT_BINARY_DIR}/MeshRepair.icns")
+
+    set(_iconset_pngs
+        "${_icon_src_dir}/icon_16x16.png"
+        "${_icon_src_dir}/icon_16x16@2x.png"
+        "${_icon_src_dir}/icon_32x32.png"
+        "${_icon_src_dir}/icon_32x32@2x.png"
+        "${_icon_src_dir}/icon_64x64.png"
+        "${_icon_src_dir}/icon_64x64@2x.png"
+        "${_icon_src_dir}/icon_128x128.png"
+        "${_icon_src_dir}/icon_128x128@2x.png"
+        "${_icon_src_dir}/icon_256x256.png"
+        "${_icon_src_dir}/icon_256x256@2x.png"
+        "${_icon_src_dir}/icon_512x512.png"
+        "${_icon_src_dir}/icon_512x512@2x.png"
+    )
+
+    foreach(_png IN LISTS _iconset_pngs)
+        if(NOT EXISTS "${_png}")
+            message(FATAL_ERROR "Missing icon asset: ${_png}")
+        endif()
+    endforeach()
+
+    add_custom_command(
+        OUTPUT "${_icns_file}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_iconset_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_16x16.png"       "${_iconset_dir}/icon_16x16.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_16x16@2x.png"    "${_iconset_dir}/icon_16x16@2x.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_32x32.png"       "${_iconset_dir}/icon_32x32.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_32x32@2x.png"    "${_iconset_dir}/icon_32x32@2x.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_64x64.png"       "${_iconset_dir}/icon_64x64.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_64x64@2x.png"    "${_iconset_dir}/icon_64x64@2x.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_128x128.png"     "${_iconset_dir}/icon_128x128.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_128x128@2x.png"  "${_iconset_dir}/icon_128x128@2x.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_256x256.png"     "${_iconset_dir}/icon_256x256.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_256x256@2x.png"  "${_iconset_dir}/icon_256x256@2x.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_512x512.png"     "${_iconset_dir}/icon_512x512.png"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_icon_src_dir}/icon_512x512@2x.png"  "${_iconset_dir}/icon_512x512@2x.png"
+        COMMAND /usr/bin/iconutil -c icns "${_iconset_dir}" -o "${_icns_file}"
+        DEPENDS ${_iconset_pngs}
+        VERBATIM
+        COMMENT "Generating MeshRepair.icns"
+    )
+
+    add_custom_target(meshrepair_gui_icns ALL DEPENDS "${_icns_file}")
+    add_dependencies(meshrepair_gui meshrepair_gui_icns)
+
+    set_source_files_properties("${_icns_file}" PROPERTIES
+        GENERATED TRUE
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
+    target_sources(meshrepair_gui PRIVATE "${_icns_file}")
+    set_target_properties(meshrepair_gui PROPERTIES
+        MACOSX_BUNDLE_ICON_FILE "MeshRepair.icns"
+    )
+endif()
+
 set(MESHREPAIR_GUI_FONT "${CMAKE_SOURCE_DIR}/external/Fira/FiraSans-Medium.otf")
 if(NOT EXISTS "${MESHREPAIR_GUI_FONT}")
     message(FATAL_ERROR "Expected font not found at ${MESHREPAIR_GUI_FONT}")
@@ -96,6 +163,21 @@ target_link_libraries(meshrepair_gui
         GLEW::glew_s
         nfd::nfd
 )
+
+if(APPLE)
+    # Bundle-friendly rpaths:
+    # - .app layout: Contents/MacOS/<exe> loads deps from Contents/Frameworks
+    # - non-bundle dev layout: allow deps next to the executable too
+    set_target_properties(meshrepair_gui PROPERTIES
+        BUILD_RPATH "@executable_path/../Frameworks;@executable_path"
+        INSTALL_RPATH "@executable_path/../Frameworks;@executable_path"
+        # Avoid embedding absolute build-tree rpaths (e.g. /Users/.../MOS/lib) which makes install non-idempotent.
+        SKIP_BUILD_RPATH TRUE
+        # Embed the install rpath at link time and avoid install_name_tool rpath edits (keeps install idempotent).
+        BUILD_WITH_INSTALL_RPATH TRUE
+        SKIP_INSTALL_RPATH TRUE
+    )
+endif()
 
 target_include_directories(meshrepair_gui
     PRIVATE
@@ -127,10 +209,37 @@ if(WIN32)
     target_link_libraries(meshrepair_gui PRIVATE ole32)
 endif()
 
-install(TARGETS meshrepair_gui
-    RUNTIME DESTINATION bin
-)
+if(APPLE)
+    install(TARGETS meshrepair_gui
+        BUNDLE DESTINATION .
+    )
+else()
+    install(TARGETS meshrepair_gui
+        RUNTIME DESTINATION bin
+    )
+endif()
+
+if(APPLE AND TARGET TBB::tbb)
+    # Bundle oneTBB dylibs so @rpath lookups succeed via @executable_path/../Frameworks.
+    get_target_property(_tbb_location TBB::tbb IMPORTED_LOCATION)
+    if(NOT _tbb_location)
+        get_target_property(_tbb_location TBB::tbb IMPORTED_LOCATION_RELEASE)
+    endif()
+    if(_tbb_location)
+        get_filename_component(_tbb_dir "${_tbb_location}" DIRECTORY)
+        file(GLOB _tbb_dylibs "${_tbb_dir}/libtbb*.dylib")
+        if(_tbb_dylibs)
+            install(FILES ${_tbb_dylibs} DESTINATION "MeshRepair.app/Contents/Frameworks")
+        endif()
+    endif()
+endif()
 
 install(FILES "${MESHREPAIR_GUI_FONT}"
     DESTINATION bin/fonts
 )
+
+if(APPLE)
+    install(FILES "${MESHREPAIR_GUI_FONT}"
+        DESTINATION "MeshRepair.app/Contents/Resources/fonts"
+    )
+endif()

@@ -15,10 +15,10 @@ from ..preferences import get_prefs
 
 
 class MESHREPAIR_OT_detect_engine(Operator):
-    """Detect meshrepair_engine executable"""
+    """Detect meshrepair executable (used as engine with --engine)"""
     bl_idname = "meshrepair.detect_engine"
     bl_label = "Detect Engine"
-    bl_description = "Automatically detect meshrepair_engine executable"
+    bl_description = "Automatically detect meshrepair executable"
 
     def execute(self, context):
         prefs = get_prefs()
@@ -29,20 +29,29 @@ class MESHREPAIR_OT_detect_engine(Operator):
 
         if platform.system() == "Windows":
             search_paths = [
+                "C:\\Program Files\\MeshRepair\\meshrepair.exe",
                 "C:\\Program Files\\MeshRepair\\meshrepair_engine.exe",
-                os.path.join(os.path.dirname(__file__), "..", "..", "build", "meshrepair_engine", "Release", "meshrepair_engine.exe"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "build", "bin", "Release", "meshrepair.exe"),
             ]
         elif platform.system() == "Linux":
             search_paths = [
+                "/usr/local/bin/meshrepair",
+                "/usr/bin/meshrepair",
                 "/usr/local/bin/meshrepair_engine",
                 "/usr/bin/meshrepair_engine",
-                os.path.join(os.path.dirname(__file__), "..", "..", "build", "meshrepair_engine", "meshrepair_engine"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "build", "bin", "meshrepair"),
             ]
         elif platform.system() == "Darwin":  # macOS
             search_paths = [
+                # Preferred: engine bundled with the app (DMG install).
+                "/Applications/MeshRepair.app/Contents/MacOS/meshrepair",
+                # Fallbacks
+                "/usr/local/bin/meshrepair",
+                "/usr/bin/meshrepair",
                 "/usr/local/bin/meshrepair_engine",
                 "/Applications/MeshRepair/meshrepair_engine",
-                os.path.join(os.path.dirname(__file__), "..", "..", "build", "meshrepair_engine", "meshrepair_engine"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "build", "INSTALL", "MeshRepair.app", "Contents", "MacOS", "meshrepair"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "build", "INSTALL", "bin", "meshrepair"),
             ]
 
         # Search for engine

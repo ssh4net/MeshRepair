@@ -20,7 +20,7 @@ class MeshRepairPreferences(AddonPreferences):
     # Engine configuration
     engine_path: StringProperty(
         name="Engine Path",
-        description="Path to meshrepair_engine executable",
+        description="Path to meshrepair executable (used with --engine for IPC mode)",
         default="",
         subtype='FILE_PATH'
     )

@@ -216,6 +216,15 @@ findFontPath(const char* argv0)
         }
     }
 
+#if defined(__APPLE__)
+    // .app bundle layout: <App>.app/Contents/MacOS/<exe>
+    // Fonts live in: <App>.app/Contents/Resources/fonts/
+    if (exeDir.filename() == "MacOS" && exeDir.parent_path().filename() == "Contents") {
+        fs::path resourcesDir = exeDir.parent_path() / "Resources";
+        candidates.emplace_back(resourcesDir / "fonts" / "FiraSans-Medium.otf");
+    }
+#endif
+
     candidates.emplace_back(exeDir / "fonts" / "FiraSans-Medium.otf");
     candidates.emplace_back(exeDir / ".." / "share" / "meshrepair-gui" / "fonts" / "FiraSans-Medium.otf");
 
